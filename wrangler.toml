@@ -22,3 +22,9 @@ crons = ["*/30 * * * *", "0 7 * * *", "0 8 * * *"]
 
 [observability]
 enabled = true
+
+# Public routes: 60 requests / minute / IP (§7).
+[[ratelimits]]
+name = "RATE_LIMITER"
+namespace_id = "1001"
+simple = { limit = 60, period = 60 }

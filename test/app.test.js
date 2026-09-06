@@ -7,7 +7,7 @@ import { memoryD1 } from './d1.js';
 import { CONTACTS } from './fixtures/contacts.js';
 
 const schedule = loadSchedule(readRepoFile('schedule.json'));
-const ENV = () => ({ MEMBER_TAGS: 'founding-member', MEMBER_TAG_PREFIXES: 'foundations-', STAFF_PIN: '1234', DB: memoryD1() });
+const ENV = () => ({ MEMBER_TAGS: 'founding-member', MEMBER_TAG_PREFIXES: 'foundations-', STAFF_PIN: '1234', ID_SALT: 'unit-test-salt-value', DB: memoryD1() });
 
 function appWith(contacts) {
   return createApp(schedule, {
