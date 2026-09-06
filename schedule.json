@@ -1,0 +1,20 @@
+{
+  "timezone": "America/New_York",
+  "programs": {
+    "kids-3-5":   { "label": "Kids 3-5",   "tag": "program:kids-3-5" },
+    "kids-6-9":   { "label": "Kids 6-9",   "tag": "program:kids-6-9" },
+    "kids-10-14": { "label": "Kids 10-14", "tag": "program:kids-10-14" },
+    "adult":      { "label": "Adult",      "tag": "program:adult" }
+  },
+  "classes": [
+    { "name": "Kids 3-5",     "program": "kids-3-5",   "days": ["Tue","Thu"], "start": "16:00", "minutes": 30 },
+    { "name": "Kids 6-9",     "program": "kids-6-9",   "days": ["Tue","Wed","Thu"], "start": "16:30", "minutes": 45 },
+    { "name": "Kids 10-14",   "program": "kids-10-14", "days": ["Tue","Wed","Thu"], "start": "17:15", "minutes": 60 },
+    { "name": "Adult BJJ",    "program": "adult",      "days": ["Tue","Thu"], "start": "18:15", "minutes": 60 },
+    { "name": "Adult No-Gi",  "program": "adult",      "days": ["Wed"],       "start": "18:15", "minutes": 60 },
+    { "name": "Kids 3-5",     "program": "kids-3-5",   "days": ["Sat"], "start": "10:30", "minutes": 30 },
+    { "name": "Kids 6-9",     "program": "kids-6-9",   "days": ["Sat"], "start": "11:00", "minutes": 45 },
+    { "name": "Kids 10-14",   "program": "kids-10-14", "days": ["Sat"], "start": "11:45", "minutes": 60 },
+    { "name": "Adult BJJ",    "program": "adult",      "days": ["Sat"], "start": "13:00", "minutes": 60 }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "name": "btt-checkin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Member check-in kiosk for Brazilian Top Team Bridgewater. Cloudflare Worker + D1.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"test/**/*.test.js\"",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.129.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

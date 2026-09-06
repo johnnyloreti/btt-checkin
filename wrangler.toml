@@ -1,0 +1,24 @@
+name = "btt-checkin"
+main = "src/index.js"
+compatibility_date = "2026-08-01"
+
+# Johnny: paste the database_id returned by `wrangler d1 create btt-checkin`.
+[[d1_databases]]
+binding = "DB"
+database_name = "btt-checkin"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+
+[vars]
+GHL_LOCATION_ID = "ARCSFhJ0JlkcuzfZtyEJ"
+TZ = "America/New_York"
+MEMBER_TAGS = "founding-member"
+MEMBER_TAG_PREFIXES = "foundations-"
+
+# Cron runs in UTC. Roster sync every 30 min. Rollup fires at both 07:00 and
+# 08:00 UTC; the scheduled handler runs it only when the ET hour is 3, so it
+# lands at 03:00 ET year-round across DST.
+[triggers]
+crons = ["*/30 * * * *", "0 7 * * *", "0 8 * * *"]
+
+[observability]
+enabled = true
