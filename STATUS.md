@@ -33,7 +33,7 @@
 ## Things the brief got wrong or left open
 
 - The staff mock shows "Sat Sep 6". 2026-09-06 is a Sunday. The code uses real weekdays.
-- Class durations (30 / 45 / 60 / 60) are still the inferred values. They only affect nothing today, since the window is computed from start time. Confirm them anyway so `schedule.json` is true.
+- Class durations (30 / 45 / 60 / 60) are still the inferred values. They affect nothing today, since the window is computed from the start time alone. Confirm them anyway so `schedule.json` is true.
 - Founding members without a `program:*` tag land in Adult and are listed by name in the roster sync log detail. Setup task 4 clears that list.
 
 ## Your setup tasks before first deploy (§11)
