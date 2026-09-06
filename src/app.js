@@ -2,7 +2,8 @@
 // object so tests can pass their own without touching the JSON import.
 
 import { syncRoster } from './roster.js';
-import { fetchAllContacts } from './ghl.js';
+import { fetchAllContacts, fetchCustomFieldIds, ghlPutContactCustomFields } from './ghl.js';
+import { runRollup } from './rollup.js';
 import { isStaff, pinMatches, issueToken, cookieHeader, SESSION_MS } from './staff-auth.js';
 import { buildIdMap, opaqueId, requireSalt } from './ids.js';
 import { matchClasses } from './classes.js';
@@ -33,20 +34,32 @@ export async function health(env, schedule) {
     lastRosterSync: null,
     lastRosterOutcome: null,
     memberCount: null,
+    lastRollup: null,
+    lastRollupOutcome: null,
+    pendingRollups: null,
     schedulePresent: Boolean(schedule && Array.isArray(schedule.classes) && schedule.classes.length > 0),
   };
   try {
-    const [count, last] = await Promise.all([
+    const [count, last, rollup, pending] = await Promise.all([
       env.DB.prepare('SELECT COUNT(*) AS n FROM members WHERE active = 1').first(),
       env.DB.prepare(
         "SELECT ran_at, outcome FROM sync_log WHERE job = 'roster' ORDER BY ran_at DESC, id DESC LIMIT 1",
       ).first(),
+      env.DB.prepare(
+        "SELECT ran_at, outcome FROM sync_log WHERE job = 'rollup' ORDER BY ran_at DESC, id DESC LIMIT 1",
+      ).first(),
+      env.DB.prepare('SELECT COUNT(*) AS n FROM pending_rollups').first(),
     ]);
     out.memberCount = count ? Number(count.n) : 0;
     if (last) {
       out.lastRosterSync = last.ran_at;
       out.lastRosterOutcome = last.outcome;
     }
+    if (rollup) {
+      out.lastRollup = rollup.ran_at;
+      out.lastRollupOutcome = rollup.outcome;
+    }
+    out.pendingRollups = pending ? Number(pending.n) : 0;
   } catch (e) {
     out.ok = false;
     out.error = `d1: ${e && e.message ? e.message : String(e)}`;
@@ -117,6 +130,12 @@ export function defaultDeps() {
   return {
     runRosterSync: (env, schedule, now) =>
       syncRoster(env, schedule, { fetchContacts: () => fetchAllContacts(env), now }),
+    runRollup: (env, schedule, now) =>
+      runRollup(env, schedule, {
+        fetchFields: () => fetchCustomFieldIds(env),
+        putContact: (id, fields) => ghlPutContactCustomFields(env, id, fields),
+        now,
+      }),
     now: () => new Date(),
   };
 }
@@ -205,6 +224,10 @@ export function createApp(schedule, deps = defaultDeps()) {
 
           if (method === 'POST' && path === '/api/staff/sync') {
             const result = await deps.runRosterSync(env, schedule, now());
+            return json(result, result.outcome === 'failed' ? 502 : 200);
+          }
+          if (method === 'POST' && path === '/api/staff/rollup') {
+            const result = await deps.runRollup(env, schedule, now());
             return json(result, result.outcome === 'failed' ? 502 : 200);
           }
           if (method === 'GET' && path === '/api/staff/today') {

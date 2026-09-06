@@ -20,7 +20,7 @@ async function setup(now = SAT_1105) {
   const env = { MEMBER_TAGS: 'founding-member', MEMBER_TAG_PREFIXES: 'foundations-', STAFF_PIN: '1234', ID_SALT: SALT, TZ: 'America/New_York', DB };
   await syncRoster(env, schedule, { fetchContacts: async () => ({ contacts: CONTACTS, pages: 1 }), now: new Date(now.getTime() - 3600_000) });
   const clock = { now };
-  const app = createApp(schedule, { runRosterSync: async () => ({ outcome: 'ok' }), now: () => clock.now });
+  const app = createApp(schedule, { runRosterSync: async () => ({ outcome: 'ok' }), runRollup: async () => ({ outcome: 'ok', pushed: 0 }), now: () => clock.now });
   let cookie = '';
   const call = (path, { method = 'GET', body, headers = {}, ip = '10.0.0.1' } = {}) =>
     app.fetch(
@@ -210,4 +210,12 @@ test('header PIN still works for the shell sync trigger', async () => {
   const { call } = await setup();
   const res = await call('/api/staff/sync', { method: 'POST', headers: { 'x-staff-pin': '1234' } });
   assert.equal(res.status, 200);
+});
+
+test('POST /api/staff/rollup runs the push on demand', async () => {
+  const { call, login } = await setup();
+  await login();
+  const res = await call('/api/staff/rollup', { method: 'POST' });
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).outcome, 'ok');
 });

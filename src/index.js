@@ -24,8 +24,8 @@ export default {
       return;
     }
     if (job === 'rollup') {
-      // Rollup push lands in §10 step 6.
-      console.log(`cron ${event.cron}: rollup not implemented yet`);
+      const result = await deps.runRollup(env, schedule, now);
+      console.log(`rollup push: ${result.outcome}`, JSON.stringify(result));
     }
   },
 };

@@ -62,3 +62,38 @@ export async function fetchAllContacts(env, { fetchImpl = fetch, limit = 100, ma
   }
   return { contacts: all, pages };
 }
+
+/**
+ * Custom field definitions for the location. Returns Map<key, id> where key
+ * is the field key without its "contact." prefix. GHL returns either
+ * { customFields: [...] } or a bare array depending on version.
+ */
+export async function fetchCustomFieldIds(env, fetchImpl = fetch) {
+  const data = await ghlGet(env, `/locations/${env.GHL_LOCATION_ID}/customFields`, {}, fetchImpl);
+  const list = Array.isArray(data) ? data : Array.isArray(data.customFields) ? data.customFields : [];
+  const map = new Map();
+  for (const f of list) {
+    if (!f || !f.id) continue;
+    const raw = String(f.fieldKey || f.key || f.name || '');
+    const key = raw.replace(/^contact\./, '').trim().toLowerCase();
+    if (key && !map.has(key)) map.set(key, String(f.id));
+  }
+  return map;
+}
+
+/**
+ * THE ONLY WRITE (§6): PUT /contacts/{id} with custom field values.
+ * fields: [{ id, field_value }]. Nothing else about the contact is sent.
+ */
+export async function ghlPutContactCustomFields(env, contactId, fields, fetchImpl = fetch) {
+  if (!contactId) throw new Error('contactId required');
+  if (!Array.isArray(fields) || fields.length === 0) throw new Error('no fields to write');
+  const path = `/contacts/${encodeURIComponent(contactId)}`;
+  const res = await fetchImpl(new URL(path, GHL_BASE).toString(), {
+    method: 'PUT',
+    headers: { ...headers(env), 'content-type': 'application/json' },
+    body: JSON.stringify({ customFields: fields.map((f) => ({ id: f.id, field_value: f.field_value })) }),
+  });
+  if (!res.ok) throw new GhlError(res.status, path, await res.text().catch(() => ''));
+  return res.json().catch(() => ({}));
+}

@@ -10,7 +10,9 @@ test('/health reports counts and last roster sync', async () => {
   const DB = fakeD1({
     rows: {
       'FROM members': { n: 42 },
-      'FROM sync_log': { ran_at: '2026-09-06T14:00:00.000Z', outcome: 'ok' },
+      "job = 'roster'": { ran_at: '2026-09-06T14:00:00.000Z', outcome: 'ok' },
+      "job = 'rollup'": { ran_at: '2026-09-06T07:00:00.000Z', outcome: 'degraded' },
+      'FROM pending_rollups': { n: 3 },
     },
   });
   const app = createApp(schedule);
@@ -23,6 +25,9 @@ test('/health reports counts and last roster sync', async () => {
     lastRosterSync: '2026-09-06T14:00:00.000Z',
     lastRosterOutcome: 'ok',
     memberCount: 42,
+    lastRollup: '2026-09-06T07:00:00.000Z',
+    lastRollupOutcome: 'degraded',
+    pendingRollups: 3,
     schedulePresent: true,
   });
 });
