@@ -146,7 +146,7 @@ test('static kiosk files go through the assets binding, nothing else does', asyn
   const served = [];
   env.ASSETS = { fetch: async (req) => (served.push(new URL(req.url).pathname), new Response('<!doctype html>', { headers: { 'content-type': 'text/html' } })) };
   for (const p of ['/', '/search.js', '/logo.png']) assert.equal((await app.fetch(new Request(`https://x.test${p}`), env)).status, 200);
-  assert.deepEqual(served, ['/', '/search.js', '/logo.png']);
+  assert.deepEqual(served, ['/index.html', '/search.js', '/logo.png']);
   assert.equal((await app.fetch(new Request('https://x.test/staff.html'), env)).status, 404);
   assert.equal((await app.fetch(new Request('https://x.test/anything.js'), env)).status, 404);
   delete env.ASSETS;

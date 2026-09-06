@@ -3,11 +3,12 @@
 
 import { syncRoster } from './roster.js';
 import { fetchAllContacts } from './ghl.js';
-import { isStaff } from './staff-auth.js';
+import { isStaff, pinMatches, issueToken, cookieHeader, SESSION_MS } from './staff-auth.js';
 import { buildIdMap, opaqueId, requireSalt } from './ids.js';
 import { matchClasses } from './classes.js';
-import { allowRequest } from './ratelimit.js';
+import { allowRequest, PUBLIC, LOGIN } from './ratelimit.js';
 import { recordCheckin } from './checkin.js';
+import { today, classRoster, voidAttendance, memberHistory } from './staff.js';
 import { localParts } from './time.js';
 import { normalize } from '../public/search.js';
 
@@ -104,6 +105,13 @@ async function readJson(request) {
   }
 }
 
+function asset(env, request, path) {
+  if (!env.ASSETS) return json({ error: 'not found' }, 404);
+  const url = new URL(request.url);
+  url.pathname = path;
+  return env.ASSETS.fetch(new Request(url.toString(), { method: 'GET', headers: request.headers }));
+}
+
 /** Default job runners. Tests inject fixtures through deps. */
 export function defaultDeps() {
   return {
@@ -117,6 +125,23 @@ export function createApp(schedule, deps = defaultDeps()) {
   const tz = schedule.timezone;
   const now = () => (deps.now ? deps.now() : new Date());
 
+  async function checkin(env, body, method) {
+    const member = await resolveMember(env, body.contactId);
+    if (!member) return json({ error: 'unknown member' }, 404);
+    const at = now();
+    const result = await recordCheckin(env, schedule, {
+      contactId: member.ghl_contact_id,
+      className: body.className,
+      classStartLocal: body.classStartLocal,
+      clientTs: body.clientTs,
+      method,
+      memberActive: Number(member.active) === 1,
+      now: at,
+      todayLocal: localParts(at, env.TZ || tz).date,
+    });
+    return json(result.body, result.status);
+  }
+
   return {
     async fetch(request, env) {
       const url = new URL(request.url);
@@ -125,8 +150,7 @@ export function createApp(schedule, deps = defaultDeps()) {
 
       try {
         if (method === 'GET' && PUBLIC_ASSETS.has(path)) {
-          if (!env.ASSETS) return json({ error: 'not found' }, 404);
-          return env.ASSETS.fetch(request);
+          return asset(env, request, path === '/' ? '/index.html' : path);
         }
 
         if (method === 'GET' && path === '/health') {
@@ -134,9 +158,27 @@ export function createApp(schedule, deps = defaultDeps()) {
           return json(body, body.ok ? 200 : 503);
         }
 
+        // ---- staff page (PIN gate) ----
+        if (method === 'GET' && path === '/staff') {
+          const authed = await isStaff(request, env, now().getTime());
+          return asset(env, request, authed ? '/staff.html' : '/staff-login.html');
+        }
+
+        if (method === 'POST' && path === '/api/staff/login') {
+          if (!(await allowRequest(env, request, LOGIN))) return json({ error: 'too many attempts, wait a minute' }, 429, { 'retry-after': '60' });
+          const body = await readJson(request);
+          if (!body || !pinMatches(env, body.pin)) return json({ error: 'wrong PIN' }, 401);
+          const token = await issueToken(env, now().getTime());
+          return json({ ok: true }, 200, { 'set-cookie': cookieHeader(request, token, SESSION_MS / 1000) });
+        }
+
+        if (method === 'POST' && path === '/api/staff/logout') {
+          return json({ ok: true }, 200, { 'set-cookie': cookieHeader(request, '', 0) });
+        }
+
         // ---- public, rate-limited ----
         if (path === '/api/roster' || path === '/api/current-class' || path === '/api/checkin') {
-          if (!(await allowRequest(env, request))) return json({ error: 'slow down' }, 429, { 'retry-after': '60' });
+          if (!(await allowRequest(env, request, PUBLIC))) return json({ error: 'slow down' }, 429, { 'retry-after': '60' });
         }
 
         if (method === 'GET' && path === '/api/roster') {
@@ -154,31 +196,45 @@ export function createApp(schedule, deps = defaultDeps()) {
         if (method === 'POST' && path === '/api/checkin') {
           const body = await readJson(request);
           if (!body) return json({ error: 'expected JSON body' }, 400);
-          const member = await resolveMember(env, body.contactId);
-          if (!member) return json({ error: 'unknown member' }, 404);
-          const at = now();
-          const result = await recordCheckin(env, schedule, {
-            contactId: member.ghl_contact_id,
-            className: body.className,
-            classStartLocal: body.classStartLocal,
-            clientTs: body.clientTs,
-            method: 'kiosk',
-            memberActive: Number(member.active) === 1,
-            now: at,
-            todayLocal: localParts(at, env.TZ || tz).date,
-          });
-          return json(result.body, result.status);
+          return checkin(env, body, 'kiosk');
         }
 
-        // ---- staff ----
-        if (method === 'POST' && path === '/api/staff/sync') {
-          if (!isStaff(request, env)) return json({ error: 'unauthorized' }, 401);
-          const result = await deps.runRosterSync(env, schedule, now());
-          return json(result, result.outcome === 'failed' ? 502 : 200);
+        // ---- staff API (PIN) ----
+        if (path.startsWith('/api/staff/')) {
+          if (!(await isStaff(request, env, now().getTime()))) return json({ error: 'unauthorized' }, 401);
+
+          if (method === 'POST' && path === '/api/staff/sync') {
+            const result = await deps.runRosterSync(env, schedule, now());
+            return json(result, result.outcome === 'failed' ? 502 : 200);
+          }
+          if (method === 'GET' && path === '/api/staff/today') {
+            const date = url.searchParams.get('date') || localParts(now(), env.TZ || tz).date;
+            return json(await today(env, schedule, date));
+          }
+          if (method === 'GET' && path === '/api/staff/class') {
+            return json(await classRoster(env, schedule, url.searchParams.get('start'), url.searchParams.get('name')));
+          }
+          if (method === 'POST' && path === '/api/staff/add') {
+            const body = await readJson(request);
+            if (!body) return json({ error: 'expected JSON body' }, 400);
+            return checkin(env, body, 'staff');
+          }
+          if (method === 'POST' && path === '/api/staff/void') {
+            const body = await readJson(request);
+            if (!body) return json({ error: 'expected JSON body' }, 400);
+            return json(await voidAttendance(env, body.attendanceId));
+          }
+          if (method === 'GET' && path === '/api/staff/member') {
+            const member = await resolveMember(env, url.searchParams.get('id'));
+            if (!member) return json({ error: 'unknown member' }, 404);
+            const history = await memberHistory(env, schedule, member.ghl_contact_id, now());
+            return json(history);
+          }
         }
 
         return json({ error: 'not found' }, 404);
       } catch (e) {
+        if (e && e.status) return json({ error: e.message }, e.status);
         console.error(`${method} ${path} failed:`, e && e.stack ? e.stack : e);
         return json({ error: 'server error' }, 500);
       }

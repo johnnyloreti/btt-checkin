@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Staff</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root { --bg: #09090a; --bone: #f4f1e9; --gold: #e7c24c; --muted: rgba(244,241,233,.55); --line: rgba(244,241,233,.14); --tile: rgba(244,241,233,.06); --display: 'Oswald', 'Arial Narrow', sans-serif; --body: 'Inter', -apple-system, 'Helvetica Neue', Arial, sans-serif; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg); color: var(--bone); font-family: var(--body); }
+  body { min-height: 100%; padding: 0 0 40px; }
+  header { display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg); z-index: 2; }
+  header .brand { font-family: var(--display); font-weight: 600; letter-spacing: .12em; text-transform: uppercase; font-size: 15px; color: var(--muted); margin-right: auto; }
+  .tab { font: inherit; font-weight: 600; font-size: 15px; background: none; border: 1px solid var(--line); color: var(--bone); padding: 10px 16px; border-radius: 999px; cursor: pointer; }
+  .tab.active { background: var(--gold); color: #1a1607; border-color: var(--gold); }
+  .tab.quiet { color: var(--muted); }
+  main { max-width: 720px; margin: 0 auto; padding: 18px; }
+  .view { display: none; }
+  .view.active { display: block; }
+  h2 { font-family: var(--display); font-weight: 500; font-size: 32px; margin: 8px 0 16px; display: flex; align-items: center; gap: 12px; }
+  h2 .sub { color: var(--gold); font-size: 22px; }
+  .datebar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  .datebar button { font: inherit; font-size: 22px; background: var(--tile); border: 1px solid var(--line); color: var(--bone); width: 52px; height: 48px; border-radius: 12px; cursor: pointer; }
+  .list { display: flex; flex-direction: column; gap: 10px; }
+  .row { display: flex; align-items: center; gap: 14px; background: var(--tile); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; font-size: 18px; text-align: left; color: var(--bone); width: 100%; font-family: var(--body); }
+  button.row { cursor: pointer; }
+  button.row:active { border-color: var(--gold); }
+  .row .time { font-variant-numeric: tabular-nums; color: var(--muted); min-width: 84px; }
+  .row .name { font-weight: 600; flex: 1; }
+  .row .count { color: var(--gold); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .row .tag { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); border: 1px solid var(--line); padding: 3px 8px; border-radius: 999px; }
+  .row .tag.warn { color: var(--gold); border-color: var(--gold); }
+  .row .check { color: var(--gold); font-weight: 700; }
+  .row .remove { font: inherit; font-size: 14px; font-weight: 600; background: none; border: 1px solid var(--line); color: var(--muted); padding: 8px 12px; border-radius: 10px; cursor: pointer; }
+  .row .remove.confirm { color: #1a1607; background: var(--gold); border-color: var(--gold); }
+  .empty { color: var(--muted); padding: 20px 4px; font-size: 17px; }
+  .btn { font-family: var(--display); font-weight: 600; font-size: 22px; letter-spacing: .06em; text-transform: uppercase; padding: 16px; border-radius: 14px; border: 2px solid var(--line); background: transparent; color: var(--bone); cursor: pointer; width: 100%; margin-top: 14px; }
+  .btn.primary { background: var(--gold); color: #1a1607; border-color: var(--gold); }
+  .back { font: inherit; font-size: 16px; color: var(--muted); background: none; border: none; padding: 8px 0; cursor: pointer; }
+  .search { width: 100%; font: inherit; font-size: 22px; padding: 16px 18px; border-radius: 14px; border: 2px solid var(--line); background: var(--tile); color: var(--bone); outline: none; }
+  .search:focus { border-color: var(--gold); }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; margin-top: 14px; }
+  .tile { font-family: var(--body); text-align: left; background: var(--tile); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; color: var(--bone); cursor: pointer; }
+  .tile .n { font-size: 20px; font-weight: 600; }
+  .tile .p { font-size: 13px; color: var(--gold); text-transform: uppercase; letter-spacing: .05em; margin-top: 4px; }
+  .facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin: 14px 0 22px; }
+  .fact { background: var(--tile); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+  .fact .k { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .fact .v { font-size: 22px; font-weight: 600; margin-top: 4px; }
+  .fact .v.gold { color: var(--gold); }
+  .status { color: var(--muted); font-size: 14px; margin-top: 26px; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+  .status button { font: inherit; font-size: 14px; background: none; border: 1px solid var(--line); color: var(--bone); padding: 8px 12px; border-radius: 10px; cursor: pointer; }
+  .overlay { position: fixed; inset: 0; background: var(--bg); z-index: 5; display: none; flex-direction: column; padding: 18px; overflow-y: auto; }
+  .overlay.active { display: flex; }
+  .overlay .top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--gold); color: #1a1607; font-weight: 600; padding: 12px 18px; border-radius: 12px; display: none; z-index: 9; }
+  .toast.active { display: block; }
+</style>
+</head>
+<body>
+<header>
+  <span class="brand">BTT Staff</span>
+  <button class="tab active" data-tab="tonight" type="button">Tonight</button>
+  <button class="tab" data-tab="members" type="button">Members</button>
+  <button class="tab quiet" id="signout" type="button">Sign out</button>
+</header>
+
+<main>
+  <section id="tonight" class="view active">
+    <div class="datebar">
+      <button id="prev-day" type="button" aria-label="Previous day">&#8249;</button>
+      <h2 id="tonight-title" style="margin:0"></h2>
+      <button id="next-day" type="button" aria-label="Next day">&#8250;</button>
+    </div>
+    <div id="tonight-list" class="list"></div>
+    <div class="status">
+      <span id="sync-status"></span>
+      <button id="sync-now" type="button">Sync roster now</button>
+    </div>
+  </section>
+
+  <section id="class" class="view">
+    <button class="back" id="class-back" type="button">&#8249; Back to the day</button>
+    <h2 id="class-title"></h2>
+    <div id="class-list" class="list"></div>
+    <button class="btn primary" id="add-student" type="button">+ Add student</button>
+  </section>
+
+  <section id="members" class="view">
+    <h2>Members</h2>
+    <input id="member-search" class="search" type="text" placeholder="Search any member" autocomplete="off" autocorrect="off" autocapitalize="words" spellcheck="false">
+    <div id="member-tiles" class="tiles"></div>
+  </section>
+
+  <section id="member" class="view">
+    <button class="back" id="member-back" type="button">&#8249; Back to members</button>
+    <h2 id="member-title"></h2>
+    <div id="member-facts" class="facts"></div>
+    <h2 style="font-size:22px">Last 30 days</h2>
+    <div id="member-history" class="list"></div>
+  </section>
+</main>
+
+<div id="add-overlay" class="overlay">
+  <div class="top">
+    <h2 id="add-title" style="margin:0"></h2>
+    <button class="back" id="add-close" type="button">Close</button>
+  </div>
+  <input id="add-search" class="search" type="text" placeholder="Type a name" autocomplete="off" autocorrect="off" autocapitalize="words" spellcheck="false">
+  <div id="add-tiles" class="tiles"></div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script type="module">
+  import { search, formatTime } from '/search.js';
+
+  const $ = (id) => document.getElementById(id);
+  const UNSCHEDULED = 'open mat / unscheduled';
+  let tz = 'America/New_York';
+  let date = null;          // "YYYY-MM-DD" being viewed
+  let current = null;       // { name, startLocal } of the open class
+  let roster = [];
+  let rosterAt = 0;
+
+  // ---------- helpers ----------
+  async function api(path, opts = {}) {
+    const res = await fetch(path, { cache: 'no-store', ...opts, headers: { 'content-type': 'application/json', ...(opts.headers || {}) } });
+    if (res.status === 401) { location.replace('/staff'); throw new Error('signed out'); }
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+    return body;
+  }
+  const post = (path, body) => api(path, { method: 'POST', body: JSON.stringify(body) });
+  function toast(text) {
+    const t = $('toast');
+    t.textContent = text;
+    t.classList.add('active');
+    clearTimeout(toast.timer);
+    toast.timer = setTimeout(() => t.classList.remove('active'), 1800);
+  }
+  function fmtClock(iso) {
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit' });
+  }
+  function fmtDate(ymd) {
+    const [y, m, d] = ymd.split('-').map(Number);
+    return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('en-US', { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric' });
+  }
+  function shiftDate(ymd, days) {
+    const [y, m, d] = ymd.split('-').map(Number);
+    const t = new Date(Date.UTC(y, m - 1, d + days));
+    return `${t.getUTCFullYear()}-${String(t.getUTCMonth() + 1).padStart(2, '0')}-${String(t.getUTCDate()).padStart(2, '0')}`;
+  }
+  function nameOf(m) { return `${m.first} ${m.lastInitial ? m.lastInitial + '.' : ''}`.trim(); }
+  function el(tag, cls, text) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+  function showView(id) {
+    for (const v of document.querySelectorAll('.view')) v.classList.toggle('active', v.id === id);
+    const tab = id === 'tonight' || id === 'class' ? 'tonight' : 'members';
+    for (const t of document.querySelectorAll('.tab[data-tab]')) t.classList.toggle('active', t.dataset.tab === tab);
+    window.scrollTo(0, 0);
+  }
+  async function loadRoster(force = false) {
+    if (!force && roster.length && Date.now() - rosterAt < 5 * 60_000) return roster;
+    roster = await api('/api/roster');
+    rosterAt = Date.now();
+    return roster;
+  }
+
+  // ---------- tonight ----------
+  async function loadTonight() {
+    const data = await api(`/api/staff/today${date ? `?date=${date}` : ''}`);
+    tz = data.timezone || tz;
+    date = data.date;
+    $('tonight-title').textContent = fmtDate(date);
+    const list = $('tonight-list');
+    list.innerHTML = '';
+    if (data.classes.length === 0) {
+      list.appendChild(el('div', 'empty', 'No classes this day'));
+      return;
+    }
+    for (const c of data.classes) {
+      const b = el('button', 'row');
+      b.type = 'button';
+      b.dataset.start = c.startLocal;
+      b.dataset.name = c.name;
+      b.append(
+        el('span', 'time', c.start ? formatTime(c.start) : 'Any time'),
+        el('span', 'name', c.name === UNSCHEDULED ? 'Open mat, unscheduled' : c.name),
+        el('span', 'count', `${c.count} checked in`),
+      );
+      b.addEventListener('click', () => openClass(c));
+      list.appendChild(b);
+    }
+  }
+  $('prev-day').addEventListener('click', () => { date = shiftDate(date, -1); loadTonight(); });
+  $('next-day').addEventListener('click', () => { date = shiftDate(date, 1); loadTonight(); });
+
+  async function loadStatus() {
+    try {
+      const h = await (await fetch('/health', { cache: 'no-store' })).json();
+      const when = h.lastRosterSync ? `${fmtDate(h.lastRosterSync.slice(0, 10))} ${fmtClock(h.lastRosterSync)}` : 'never';
+      $('sync-status').textContent = `${h.memberCount ?? 0} members. Last roster sync ${when}${h.lastRosterOutcome && h.lastRosterOutcome !== 'ok' ? ` (${h.lastRosterOutcome})` : ''}.`;
+    } catch {
+      $('sync-status').textContent = 'Status unavailable';
+    }
+  }
+  $('sync-now').addEventListener('click', async () => {
+    $('sync-now').disabled = true;
+    try {
+      const r = await post('/api/staff/sync', {});
+      toast(r.outcome === 'ok' ? `Synced ${r.members} members` : `Sync ${r.outcome}: ${r.reason || r.error || ''}`);
+      await loadRoster(true);
+    } catch (e) {
+      toast(`Sync failed: ${e.message}`);
+    } finally {
+      $('sync-now').disabled = false;
+      loadStatus();
+    }
+  });
+
+  // ---------- class roster ----------
+  async function openClass(c) {
+    current = { name: c.name, startLocal: c.startLocal, start: c.start };
+    $('class-title').innerHTML = '';
+    $('class-title').append(
+      document.createTextNode(c.name === UNSCHEDULED ? 'Open mat' : c.name),
+      el('span', 'sub', c.start ? formatTime(c.start) : fmtDate(date)),
+    );
+    showView('class');
+    await loadClass();
+  }
+  async function loadClass() {
+    const data = await api(`/api/staff/class?start=${encodeURIComponent(current.startLocal)}&name=${encodeURIComponent(current.name)}`);
+    const list = $('class-list');
+    list.innerHTML = '';
+    if (data.rows.length === 0) list.appendChild(el('div', 'empty', 'Nobody checked in yet'));
+    for (const r of data.rows) {
+      const row = el('div', 'row');
+      row.dataset.attendanceId = r.attendanceId;
+      row.append(el('span', 'check', '✓'), el('span', 'name', `${r.first} ${r.last ? r.last[0] + '.' : ''}`), el('span', 'time', fmtClock(r.checkedInAt)));
+      if (r.method === 'staff') row.appendChild(el('span', 'tag', 'staff'));
+      if (r.statusAtCheckin === 'inactive') row.appendChild(el('span', 'tag warn', 'inactive'));
+      const rm = el('button', 'remove', 'Remove');
+      rm.type = 'button';
+      rm.addEventListener('click', async () => {
+        if (!rm.classList.contains('confirm')) {
+          rm.classList.add('confirm');
+          rm.textContent = 'Confirm remove';
+          setTimeout(() => { rm.classList.remove('confirm'); rm.textContent = 'Remove'; }, 4000);
+          return;
+        }
+        await post('/api/staff/void', { attendanceId: r.attendanceId });
+        toast(`Removed ${r.first}`);
+        await loadClass();
+      });
+      row.appendChild(rm);
+      list.appendChild(row);
+    }
+  }
+  $('class-back').addEventListener('click', async () => { showView('tonight'); await loadTonight(); });
+
+  // ---------- add student ----------
+  $('add-student').addEventListener('click', async () => {
+    $('add-title').textContent = `Add to ${current.name === UNSCHEDULED ? 'open mat' : current.name}`;
+    $('add-search').value = '';
+    $('add-tiles').innerHTML = '';
+    $('add-overlay').classList.add('active');
+    $('add-search').focus();
+    await loadRoster();
+  });
+  $('add-close').addEventListener('click', () => $('add-overlay').classList.remove('active'));
+  $('add-search').addEventListener('input', () => renderTiles($('add-tiles'), $('add-search').value, addMember));
+  async function addMember(m) {
+    try {
+      const r = await post('/api/staff/add', { contactId: m.id, className: current.name, classStartLocal: current.startLocal });
+      toast(r.duplicate ? `${m.first} was already on the list` : `Added ${m.first}`);
+      $('add-overlay').classList.remove('active');
+      await loadClass();
+    } catch (e) {
+      toast(`Could not add: ${e.message}`);
+    }
+  }
+  function renderTiles(container, q, onPick) {
+    container.innerHTML = '';
+    for (const m of search(roster, q)) {
+      const t = el('button', 'tile');
+      t.type = 'button';
+      t.dataset.id = m.id;
+      t.append(el('div', 'n', nameOf(m)), el('div', 'p', m.program || ''));
+      t.addEventListener('click', () => onPick(m));
+      container.appendChild(t);
+    }
+  }
+
+  // ---------- members ----------
+  $('member-search').addEventListener('input', async () => {
+    await loadRoster();
+    renderTiles($('member-tiles'), $('member-search').value, openMember);
+  });
+  async function openMember(m) {
+    const d = await api(`/api/staff/member?id=${encodeURIComponent(m.id)}`);
+    $('member-title').textContent = `${d.first} ${d.last}`.trim();
+    const facts = $('member-facts');
+    facts.innerHTML = '';
+    const fact = (k, v, gold) => { const f = el('div', 'fact'); f.append(el('div', 'k', k), el('div', `v${gold ? ' gold' : ''}`, v)); facts.appendChild(f); };
+    fact('Program', d.programLabels.join(' / ') || 'none');
+    fact('Lifetime', `Class #${d.lifetime}`, true);
+    fact('Status', d.active ? 'Active' : 'Inactive');
+    fact('Roster synced', d.syncedAt ? `${fmtDate(d.syncedAt.slice(0, 10))} ${fmtClock(d.syncedAt)}` : 'never');
+    fact('GHL rollup', d.rollupPending ? 'Pending tonight' : 'Up to date');
+    const list = $('member-history');
+    list.innerHTML = '';
+    if (d.last30.length === 0) list.appendChild(el('div', 'empty', 'No check-ins in the last 30 days'));
+    for (const r of d.last30) {
+      const row = el('div', 'row');
+      row.append(
+        el('span', 'time', fmtDate(r.classStartLocal.slice(0, 10))),
+        el('span', 'name', r.className === UNSCHEDULED ? 'Open mat' : `${r.className} ${formatTime(r.classStartLocal.slice(11))}`),
+        el('span', 'time', fmtClock(r.checkedInAt)),
+      );
+      if (r.method === 'staff') row.appendChild(el('span', 'tag', 'staff'));
+      if (r.status === 'voided') row.appendChild(el('span', 'tag warn', 'removed'));
+      list.appendChild(row);
+    }
+    showView('member');
+  }
+  $('member-back').addEventListener('click', () => showView('members'));
+
+  // ---------- nav ----------
+  for (const t of document.querySelectorAll('.tab[data-tab]')) {
+    t.addEventListener('click', async () => {
+      if (t.dataset.tab === 'tonight') { showView('tonight'); await loadTonight(); }
+      else { showView('members'); $('member-search').focus(); }
+    });
+  }
+  $('signout').addEventListener('click', async () => { await post('/api/staff/logout', {}).catch(() => {}); location.replace('/staff'); });
+
+  // ---------- boot ----------
+  loadTonight().catch((e) => { $('tonight-list').textContent = e.message; });
+  loadStatus();
+  setInterval(() => { if ($('tonight').classList.contains('active')) loadTonight().catch(() => {}); }, 60_000);
+</script>
+</body>
+</html>
