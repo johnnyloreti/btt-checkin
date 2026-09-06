@@ -1,5 +1,9 @@
-// app.js — HTTP router. Pure: takes the validated schedule so tests can pass
-// their own without touching the JSON import in index.js.
+// app.js — HTTP router. Pure: takes the validated schedule and a deps
+// object so tests can pass their own without touching the JSON import.
+
+import { syncRoster } from './roster.js';
+import { fetchAllContacts } from './ghl.js';
+import { isStaff } from './staff-auth.js';
 
 export function json(body, status = 200, headers = {}) {
   return new Response(JSON.stringify(body), {
@@ -40,15 +44,31 @@ export async function health(env, schedule) {
   return out;
 }
 
-export function createApp(schedule) {
+/** Default job runners. Tests inject fixtures through deps. */
+export function defaultDeps() {
+  return {
+    runRosterSync: (env, schedule, now) =>
+      syncRoster(env, schedule, { fetchContacts: () => fetchAllContacts(env), now }),
+  };
+}
+
+export function createApp(schedule, deps = defaultDeps()) {
   return {
     async fetch(request, env) {
       const url = new URL(request.url);
       const path = url.pathname.replace(/\/+$/, '') || '/';
+      const method = request.method;
 
-      if (request.method === 'GET' && path === '/health') {
+      if (method === 'GET' && path === '/health') {
         const body = await health(env, schedule);
         return json(body, body.ok ? 200 : 503);
+      }
+
+      // Manual roster sync for §12 acceptance and for "why is X missing".
+      if (method === 'POST' && path === '/api/staff/sync') {
+        if (!isStaff(request, env)) return json({ error: 'unauthorized' }, 401);
+        const result = await deps.runRosterSync(env, schedule, new Date());
+        return json(result, result.outcome === 'failed' ? 502 : 200);
       }
 
       return json({ error: 'not found' }, 404);

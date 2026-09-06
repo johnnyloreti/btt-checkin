@@ -3,11 +3,12 @@
 
 import scheduleJson from '../schedule.json';
 import { validateSchedule } from './schedule.js';
-import { createApp } from './app.js';
+import { createApp, defaultDeps } from './app.js';
 import { jobForCron } from './cron.js';
 
 const schedule = validateSchedule(scheduleJson);
-const app = createApp(schedule);
+const deps = defaultDeps();
+const app = createApp(schedule, deps);
 
 export default {
   fetch(request, env, ctx) {
@@ -15,9 +16,16 @@ export default {
   },
 
   async scheduled(event, env, ctx) {
-    const job = jobForCron(event.cron, new Date(event.scheduledTime), env.TZ || schedule.timezone);
-    if (!job) return;
-    // Roster sync lands in §10 step 2, rollup push in step 6.
-    console.log(`cron ${event.cron}: ${job} not implemented yet`);
+    const now = new Date(event.scheduledTime);
+    const job = jobForCron(event.cron, now, env.TZ || schedule.timezone);
+    if (job === 'roster') {
+      const result = await deps.runRosterSync(env, schedule, now);
+      console.log(`roster sync: ${result.outcome}`, JSON.stringify(result));
+      return;
+    }
+    if (job === 'rollup') {
+      // Rollup push lands in §10 step 6.
+      console.log(`cron ${event.cron}: rollup not implemented yet`);
+    }
   },
 };
