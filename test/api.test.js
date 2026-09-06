@@ -39,21 +39,30 @@ test('GET /api/roster returns opaque ids, first names, last initials, program la
   const roster = await res.json();
   assert.equal(roster.length, 7);
   const jack = roster.find((r) => r.first === 'Jack');
-  assert.deepEqual(jack, { id: await opaqueId('c_jack', SALT), first: 'Jack', lastInitial: 'S', program: 'Kids 6-9', programs: ['kids-6-9'] });
+  assert.deepEqual(jack, { id: await opaqueId('c_jack', SALT), first: 'Jack', lastInitial: 'S', lastKey: 'silv', program: 'Kids 6-9', programs: ['kids-6-9'] });
+  const maria = roster.find((r) => r.first === 'María');
+  assert.equal(maria.lastKey, 'nune', 'diacritics stripped, truncated');
   const leo = roster.find((r) => r.first === 'Leo');
   assert.equal(leo.program, 'Kids 10-14 / Adult');
   assert.deepEqual(leo.programs, ['kids-10-14', 'adult']);
   const text = JSON.stringify(roster);
   assert.doesNotMatch(text, /c_[a-z]+/, 'no GHL contact ids');
   assert.doesNotMatch(text, /@|phone|billing|active|inactive/i);
-  for (const r of roster) assert.deepEqual(Object.keys(r).sort(), ['first', 'id', 'lastInitial', 'program', 'programs']);
+  for (const r of roster) assert.deepEqual(Object.keys(r).sort(), ['first', 'id', 'lastInitial', 'lastKey', 'program', 'programs']);
+  for (const r of roster) assert.ok(r.lastKey.length <= 4, 'never a full last name');
 });
 
 test('GET /api/roster fails closed without ID_SALT', async () => {
   const { env, app } = await setup();
   env.ID_SALT = '';
-  const res = await app.fetch(new Request('https://x.test/api/roster'), env);
-  assert.equal(res.status, 500);
+  const orig = console.error;
+  console.error = () => {};
+  try {
+    const res = await app.fetch(new Request('https://x.test/api/roster'), env);
+    assert.equal(res.status, 500);
+  } finally {
+    console.error = orig;
+  }
 });
 
 test('GET /api/current-class computes matches server-side, with ?at for testing', async () => {
@@ -130,6 +139,18 @@ test('public routes are rate limited per IP', async () => {
   const health = await app.fetch(new Request('https://x.test/health', { headers: { 'cf-connecting-ip': '5.5.5.5' } }), env);
   assert.equal(health.status, 200, 'health is not rate limited');
   resetFallback();
+});
+
+test('static kiosk files go through the assets binding, nothing else does', async () => {
+  const { env, app } = await setup();
+  const served = [];
+  env.ASSETS = { fetch: async (req) => (served.push(new URL(req.url).pathname), new Response('<!doctype html>', { headers: { 'content-type': 'text/html' } })) };
+  for (const p of ['/', '/search.js', '/logo.png']) assert.equal((await app.fetch(new Request(`https://x.test${p}`), env)).status, 200);
+  assert.deepEqual(served, ['/', '/search.js', '/logo.png']);
+  assert.equal((await app.fetch(new Request('https://x.test/staff.html'), env)).status, 404);
+  assert.equal((await app.fetch(new Request('https://x.test/anything.js'), env)).status, 404);
+  delete env.ASSETS;
+  assert.equal((await app.fetch(new Request('https://x.test/'), env)).status, 404);
 });
 
 test('checkin on a Wednesday uses the No-Gi name for adults', async () => {

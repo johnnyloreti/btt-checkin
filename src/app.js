@@ -9,6 +9,11 @@ import { matchClasses } from './classes.js';
 import { allowRequest } from './ratelimit.js';
 import { recordCheckin } from './checkin.js';
 import { localParts } from './time.js';
+import { normalize } from '../public/search.js';
+
+/** Static files the Worker will hand to the assets binding. Everything else is 404. */
+const PUBLIC_ASSETS = new Set(['/', '/index.html', '/search.js', '/logo.png', '/favicon.ico']);
+const LAST_KEY_CHARS = 4;
 
 export function json(body, status = 200, headers = {}) {
   return new Response(JSON.stringify(body), {
@@ -49,7 +54,12 @@ export async function health(env, schedule) {
   return out;
 }
 
-/** Public roster: opaque id, first name, last initial, program label(s). Nothing else (§2). */
+/**
+ * Public roster: opaque id, first name, last initial, program label(s),
+ * program keys, and lastKey: the first few normalized letters of the last
+ * name so the kiosk can match a last-name prefix without shipping full
+ * last names. Nothing else (§2, §7).
+ */
 export async function publicRoster(env, schedule) {
   const salt = requireSalt(env);
   const { results } = await env.DB.prepare(
@@ -68,6 +78,7 @@ export async function publicRoster(env, schedule) {
       id: await opaqueId(row.ghl_contact_id, salt),
       first: row.first_name,
       lastInitial: row.last_name ? row.last_name[0].toUpperCase() : '',
+      lastKey: normalize(row.last_name).slice(0, LAST_KEY_CHARS),
       program: programs.map((p) => schedule.programs[p].label).join(' / '),
       programs,
     });
@@ -113,6 +124,11 @@ export function createApp(schedule, deps = defaultDeps()) {
       const method = request.method;
 
       try {
+        if (method === 'GET' && PUBLIC_ASSETS.has(path)) {
+          if (!env.ASSETS) return json({ error: 'not found' }, 404);
+          return env.ASSETS.fetch(request);
+        }
+
         if (method === 'GET' && path === '/health') {
           const body = await health(env, schedule);
           return json(body, body.ok ? 200 : 503);

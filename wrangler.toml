@@ -20,6 +20,15 @@ MEMBER_TAG_PREFIXES = "foundations-"
 [triggers]
 crons = ["*/30 * * * *", "0 7 * * *", "0 8 * * *"]
 
+# Kiosk and staff pages plus their JS live in public/. The Worker runs first
+# so it decides what is served (the staff page is gated) and everything
+# else goes through env.ASSETS.
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = true
+not_found_handling = "none"
+
 [observability]
 enabled = true
 
