@@ -52,8 +52,21 @@ test('founding-member without a program tag is adult and flagged', () => {
   assert.match(r.flag, /no program tag/);
 });
 
+test('program:none is a paying non-student: not a member, not flagged', () => {
+  const r = classifyContact(byId('c_parent'), cfg);
+  assert.equal(r.isMember, false);
+  assert.equal(r.notStudent, true);
+  assert.equal(r.flag, null);
+  // program:none alongside a real program tag still means not a student.
+  const both = classifyContact({ id: 'x', tags: ['founding-member', 'program:adult', 'program:none'] }, cfg);
+  assert.equal(both.isMember, false);
+  // Without a member tag it is simply a non-member.
+  assert.equal(classifyContact({ id: 'y', tags: ['program:none'] }, cfg).notStudent, undefined);
+});
+
 test('buildRoster keeps members only, flags by name, skips blank first names', () => {
-  const { members, flagged } = buildRoster(CONTACTS, cfg);
+  const { members, flagged, notStudents } = buildRoster(CONTACTS, cfg);
+  assert.deepEqual(notStudents, ['c_parent']);
   assert.deepEqual(
     members.map((m) => m.ghl_contact_id),
     ['c_jack', 'c_emma', 'c_leo', 'c_maria', 'c_dan', 'c_future', 'c_sam'],
@@ -75,6 +88,8 @@ test('syncRoster writes members, logs ok with flagged names', async () => {
   assert.equal(result.members, 7);
   assert.equal(result.contacts, CONTACTS.length);
   assert.equal(result.deactivated, 0);
+  assert.equal(result.notStudents, 1);
+  assert.equal(result.removed, 0);
   assert.deepEqual(result.flagged, [
     'Sam Untagged: no program tag, defaulted to adult',
     'Blank: no first name, skipped',
@@ -191,4 +206,28 @@ test('buildRoster tidies lowercase names from GHL', () => {
   const { members } = buildRoster([{ id: 'x', firstName: 'nicolas', lastName: 'mendes', tags: ['founding-member', 'program:adult'] }], cfg);
   assert.equal(members[0].first_name, 'Nicolas');
   assert.equal(members[0].last_name, 'Mendes');
+});
+
+test('tagging a synced parent program:none removes their row; attendance stays', async () => {
+  const DB = memoryD1();
+  const env = { ...ENV, DB };
+  // First sync: the parent is a plain founding member and lands in Adult, flagged.
+  const before = CONTACTS.map((c) => (c.id === 'c_parent' ? { ...c, tags: ['founding-member'] } : c));
+  let r = await syncRoster(env, schedule, { fetchContacts: async () => ({ contacts: before, pages: 1 }), now: NOW });
+  assert.equal(r.members, 8);
+  assert.ok(r.flagged.some((f) => f.startsWith('Paula Payer')));
+  DB.raw
+    .prepare("INSERT INTO attendance (ghl_contact_id, class_name, class_start_local, checked_in_at, method) VALUES ('c_parent', 'open mat / unscheduled', '2026-09-05T00:00', '2026-09-05T14:00:00Z', 'kiosk')")
+    .run();
+  // Second sync: tagged program:none.
+  r = await syncRoster(env, schedule, { fetchContacts: async () => ({ contacts: CONTACTS, pages: 1 }), now: new Date(NOW.getTime() + 60_000) });
+  assert.equal(r.members, 7);
+  assert.equal(r.removed, 1);
+  assert.equal(r.notStudents, 1);
+  assert.ok(!r.flagged.some((f) => f.startsWith('Paula')));
+  assert.equal(DB.raw.prepare("SELECT COUNT(*) AS n FROM members WHERE ghl_contact_id = 'c_parent'").get().n, 0);
+  assert.equal(DB.raw.prepare("SELECT COUNT(*) AS n FROM attendance WHERE ghl_contact_id = 'c_parent'").get().n, 1);
+  // Third sync, same tags: nothing to remove, still quiet.
+  r = await syncRoster(env, schedule, { fetchContacts: async () => ({ contacts: CONTACTS, pages: 1 }), now: new Date(NOW.getTime() + 120_000) });
+  assert.equal(r.removed, 0);
 });

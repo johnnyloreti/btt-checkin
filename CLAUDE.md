@@ -225,6 +225,7 @@ Every check-in inserts into `pending_rollups` so the nightly job only touches co
 - `programs` from tags: each `program:*` tag that matches a key in `schedule.json` is added. Rules for contacts with no `program:*` tag:
   - has a `foundations-*` tag → `["adult"]`, no flag needed (Foundations is the adult program)
   - has only `founding-member` → `["adult"]` **and flagged** in `sync_log` detail by name, because founding members include kids and the kiosk cannot match them to a kids class until Johnny tags them.
+  - has `program:none` → **not a student**: a paying parent who keeps `founding-member` for billing. Never a kiosk tile, never flagged, and any existing `members` row is removed (attendance stays). (Added by Johnny, 2026-09-07.)
 - Contacts that lose all member tags are set `active = 0`, not deleted. Their attendance stays.
 - **Emptiness guard:** if the sync returns zero members, log `degraded` and keep the previous roster. Do not wipe the table.
 

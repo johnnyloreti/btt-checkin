@@ -1,6 +1,12 @@
 // roster.js — turn GHL contacts into the members table.
 // Rules from §6. Pure functions first, then the sync that touches D1.
 
+/**
+ * A contact with this tag is a paying family member who does not train:
+ * founding-member for billing, but never a kiosk tile. Added 2026-09-07.
+ */
+export const NOT_A_STUDENT_TAG = 'program:none';
+
 /** Parse a comma-separated env var into trimmed lowercase entries. */
 export function parseList(str) {
   return String(str || '')
@@ -41,6 +47,7 @@ export function classifyContact(contact, cfg) {
   const hasPrefix = tags.some((t) => cfg.memberTagPrefixes.some((p) => t.startsWith(p)));
   const isMember = hasExact || hasPrefix;
   if (!isMember) return { isMember: false, programs: [], flag: null };
+  if (tags.includes(NOT_A_STUDENT_TAG)) return { isMember: false, notStudent: true, programs: [], flag: null };
 
   // Programs in schedule order so output is stable regardless of tag order.
   const programs = [];
@@ -68,21 +75,25 @@ export function tidyName(name) {
 }
 
 function displayName(contact) {
-  const first = String(contact.firstName || '').trim();
-  const last = String(contact.lastName || '').trim();
+  const first = tidyName(contact.firstName);
+  const last = tidyName(contact.lastName);
   return `${first} ${last}`.trim() || contact.contactName || contact.email || contact.id || '(unknown)';
 }
 
 /**
  * Build the member list from a page of contacts.
- * Returns { members, flagged } where flagged is [{ id, name, reason }].
+ * Returns { members, flagged, notStudents } where flagged is
+ * [{ id, name, reason }] and notStudents is the contact ids tagged
+ * program:none, which the sync removes from the table if present.
  */
 export function buildRoster(contacts, cfg) {
   const members = [];
   const flagged = [];
+  const notStudents = [];
   for (const c of contacts) {
     if (!c || !c.id) continue;
-    const { isMember, programs, flag } = classifyContact(c, cfg);
+    const { isMember, programs, flag, notStudent } = classifyContact(c, cfg);
+    if (notStudent) notStudents.push(c.id);
     if (!isMember) continue;
     const first = tidyName(c.firstName);
     const last = tidyName(c.lastName);
@@ -93,7 +104,7 @@ export function buildRoster(contacts, cfg) {
     if (flag) flagged.push({ id: c.id, name: displayName(c), reason: flag });
     members.push({ ghl_contact_id: c.id, first_name: first, last_name: last, programs });
   }
-  return { members, flagged };
+  return { members, flagged, notStudents };
 }
 
 async function logSync(db, job, ranAt, outcome, detail) {
@@ -130,7 +141,7 @@ export async function syncRoster(env, schedule, deps) {
   }
 
   const contacts = fetched.contacts || [];
-  const { members, flagged } = buildRoster(contacts, cfg);
+  const { members, flagged, notStudents } = buildRoster(contacts, cfg);
 
   if (members.length === 0) {
     const detail = {
@@ -158,14 +169,21 @@ export async function syncRoster(env, schedule, deps) {
     );
     // Anyone not touched this run has lost their member tags.
     stmts.push(db.prepare('UPDATE members SET active = 0 WHERE synced_at <> ? AND active = 1').bind(ranAt));
+    const deactivateIdx = stmts.length - 1;
+    // program:none is a paying non-student: never a tile, so not a members row.
+    // Their attendance, if any, stays.
+    for (const id of notStudents) stmts.push(db.prepare('DELETE FROM members WHERE ghl_contact_id = ?').bind(id));
     const results = await db.batch(stmts);
-    const deactivated = results[results.length - 1]?.meta?.changes ?? null;
+    const deactivated = results[deactivateIdx]?.meta?.changes ?? null;
+    const removed = results.slice(deactivateIdx + 1).reduce((n, r) => n + Number(r?.meta?.changes ?? 0), 0);
 
     const detail = {
       members: members.length,
       contacts: contacts.length,
       pages: fetched.pages || 0,
       deactivated,
+      notStudents: notStudents.length,
+      removed,
       flagged: flagged.map((f) => `${f.name}: ${f.reason}`),
     };
     await logSync(db, 'roster', ranAt, 'ok', detail);
