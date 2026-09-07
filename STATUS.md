@@ -1,7 +1,7 @@
 # btt-checkin STATUS
 
-**Last updated:** 2026-09-06
-**Build order (§10):** steps 1 through 7 complete. V1 is code-complete and has never been deployed.
+**Last updated:** 2026-09-07
+**Build order (§10):** steps 1 through 7 complete. Deployed 2026-09-07 at `https://btt-checkin.black-term-300b.workers.dev` with the cron trigger active. First roster sync returned 31 members.
 
 ## What is built
 
@@ -35,6 +35,7 @@
 - The staff mock shows "Sat Sep 6". 2026-09-06 is a Sunday. The code uses real weekdays.
 - Class durations (30 / 45 / 60 / 60) are still the inferred values. They affect nothing today, since the window is computed from the start time alone. Confirm them anyway so `schedule.json` is true.
 - Founding members without a `program:*` tag land in Adult and are listed by name in the roster sync log detail. Setup task 4 clears that list.
+- Paying parents who do not train keep `founding-member` and get `program:none`. That removes them from the kiosk, the staff search, and the flagged list.
 
 ## Your setup tasks before first deploy (§11)
 
