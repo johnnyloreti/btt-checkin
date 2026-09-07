@@ -34,3 +34,22 @@ test('login policy is 5 per minute and independent of the public counter', async
   assert.equal(await allowRequest(env, req('4.4.4.4'), LOGIN), false, 'uses the login binding when present');
   resetFallback();
 });
+
+test('behind the Netlify proxy the real visitor address is used, only with the shared key', async () => {
+  const { clientIp } = await import('../src/ratelimit.js');
+  const viaProxy = (headers) => new Request('https://x.test/api/roster', { headers: { 'cf-connecting-ip': '3.3.3.3', 'x-nf-client-connection-ip': '9.9.9.9', ...headers } });
+  const env = { PROXY_KEY: 'shared-secret-value' };
+  assert.equal(clientIp(viaProxy({ 'x-proxy-key': 'shared-secret-value' }), env), '9.9.9.9');
+  assert.equal(clientIp(viaProxy({ 'x-proxy-key': 'wrong' }), env), '3.3.3.3', 'bad key: ignore the forwarded header');
+  assert.equal(clientIp(viaProxy({}), env), '3.3.3.3', 'no key: ignore it');
+  assert.equal(clientIp(viaProxy({ 'x-proxy-key': '' }), { PROXY_KEY: '' }), '3.3.3.3', 'no PROXY_KEY configured: never trust it');
+  assert.equal(clientIp(viaProxy({ 'x-proxy-key': 'shared-secret-value' }), {}), '3.3.3.3');
+  // Two kiosk visitors through the proxy are limited separately.
+  resetFallback();
+  const t0 = 9_000_000;
+  for (let i = 0; i < 60; i += 1) assert.equal(await allowRequest(env, viaProxy({ 'x-proxy-key': 'shared-secret-value' }), PUBLIC, t0 + i), true);
+  assert.equal(await allowRequest(env, viaProxy({ 'x-proxy-key': 'shared-secret-value' }), PUBLIC, t0 + 60), false);
+  const other = new Request('https://x.test/api/roster', { headers: { 'cf-connecting-ip': '3.3.3.3', 'x-nf-client-connection-ip': '8.8.8.8', 'x-proxy-key': 'shared-secret-value' } });
+  assert.equal(await allowRequest(env, other, PUBLIC, t0 + 60), true);
+  resetFallback();
+});

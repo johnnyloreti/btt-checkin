@@ -3,3 +3,6 @@
 GHL_TOKEN=
 STAFF_PIN=
 ID_SALT=
+# Optional. Shared with the Netlify proxy on checkin.bttbridgewater.com so the
+# Worker can read the real visitor address for rate limiting.
+PROXY_KEY=
