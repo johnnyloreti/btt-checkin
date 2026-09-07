@@ -55,6 +55,18 @@ export function classifyContact(contact, cfg) {
   return { isMember: true, programs: ['adult'], flag: 'no program tag, defaulted to adult' };
 }
 
+/**
+ * GHL often stores names typed in lowercase on a form. When a name has no
+ * capital letters at all, capitalize each word so the tile reads
+ * "Nicolas Mendes". Names with any capitals are left exactly as entered,
+ * so McDonald, da Silva, and DeLuca survive.
+ */
+export function tidyName(name) {
+  const s = String(name || '').trim().replace(/\s+/g, ' ');
+  if (!s || /[A-ZÀ-ÖØ-Þ]/.test(s)) return s;
+  return s.replace(/(^|[\s'-])(\p{L})/gu, (m, sep, ch) => sep + ch.toUpperCase());
+}
+
 function displayName(contact) {
   const first = String(contact.firstName || '').trim();
   const last = String(contact.lastName || '').trim();
@@ -72,8 +84,8 @@ export function buildRoster(contacts, cfg) {
     if (!c || !c.id) continue;
     const { isMember, programs, flag } = classifyContact(c, cfg);
     if (!isMember) continue;
-    const first = String(c.firstName || '').trim();
-    const last = String(c.lastName || '').trim();
+    const first = tidyName(c.firstName);
+    const last = tidyName(c.lastName);
     if (!first) {
       flagged.push({ id: c.id, name: displayName(c), reason: 'no first name, skipped' });
       continue;

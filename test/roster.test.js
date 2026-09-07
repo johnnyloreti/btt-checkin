@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyContact, buildRoster, rosterConfig, parseList, syncRoster } from '../src/roster.js';
+import { classifyContact, buildRoster, rosterConfig, parseList, syncRoster, tidyName } from '../src/roster.js';
 import { loadSchedule } from '../src/schedule.js';
 import { readRepoFile } from './helpers.js';
 import { memoryD1 } from './d1.js';
@@ -171,4 +171,24 @@ test('a GHL failure logs failed and leaves the table untouched', async () => {
   const last = DB.raw.prepare('SELECT outcome, detail FROM sync_log ORDER BY id DESC LIMIT 1').get();
   assert.equal(last.outcome, 'failed');
   assert.match(last.detail, /401/);
+});
+
+test('tidyName capitalizes all-lowercase names and leaves mixed case alone', () => {
+  assert.equal(tidyName('nicolas'), 'Nicolas');
+  assert.equal(tidyName('mendes'), 'Mendes');
+  assert.equal(tidyName('mary ann'), 'Mary Ann');
+  assert.equal(tidyName("o'brien-smith"), "O'Brien-Smith");
+  assert.equal(tidyName('josé'), 'José');
+  assert.equal(tidyName('McDonald'), 'McDonald');
+  assert.equal(tidyName('da Silva'), 'da Silva');
+  assert.equal(tidyName('DeLuca'), 'DeLuca');
+  assert.equal(tidyName('  jack  '), 'Jack');
+  assert.equal(tidyName(''), '');
+  assert.equal(tidyName(undefined), '');
+});
+
+test('buildRoster tidies lowercase names from GHL', () => {
+  const { members } = buildRoster([{ id: 'x', firstName: 'nicolas', lastName: 'mendes', tags: ['founding-member', 'program:adult'] }], cfg);
+  assert.equal(members[0].first_name, 'Nicolas');
+  assert.equal(members[0].last_name, 'Mendes');
 });
