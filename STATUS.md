@@ -1,7 +1,7 @@
 # btt-checkin STATUS
 
 **Last updated:** 2026-09-07
-**Build order (§10):** steps 1 through 7 complete. Deployed 2026-09-07 at `https://btt-checkin.black-term-300b.workers.dev` with the cron trigger active. First roster sync returned 31 members.
+**Build order (§10):** steps 1 through 7 complete. Deployed 2026-09-07 at `https://btt-checkin.black-term-300b.workers.dev` with the cron trigger active. Acceptance test passed the same day: kiosk check-in, staff roster, and a rollup that filled all five GHL fields. Logo in place.
 
 ## What is built
 
@@ -42,8 +42,16 @@
 1. GHL: mint the `BTT Check-In` Private Integration with exactly `contacts.readonly`, `contacts.write`, `locations/customFields.readonly`.
 2. GHL: create five contact custom fields with these exact keys: `attendance_last`, `attendance_30d`, `attendance_lifetime`, `attendance_week`, `attendance_class_count_label`. Text type is fine for all five.
 3. GHL: tag every `founding-member` contact with one `program:*` tag.
-4. Drop the logo at `public/logo.png`. Until then the kiosk hides the image slot.
+4. Logo is in place at `public/logo.png`. The file name must stay lowercase; Cloudflare serves `logo.PNG` and `logo.png` as different files.
 5. Pick a 4-digit staff PIN and a long random `ID_SALT` (32 or more characters). Changing either later signs all staff out.
+
+## Still open after go-live
+
+- Rotate `STAFF_PIN`; the first one was pasted into a chat.
+- Confirm the four class durations in `schedule.json`.
+- iPad: Add to Home Screen, Guided Access, auto-lock off.
+- Consider Workers Paid ($5/month) for the request and D1 caps.
+- Custom hostname `checkin.bttbridgewater.com` once stable.
 
 ## Deploy (PowerShell, inside `C:\Users\Johnm\btt-checkin`)
 
