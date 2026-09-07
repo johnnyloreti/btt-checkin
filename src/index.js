@@ -4,7 +4,7 @@
 import scheduleJson from '../schedule.json';
 import { validateSchedule } from './schedule.js';
 import { createApp, defaultDeps } from './app.js';
-import { jobForCron } from './cron.js';
+import { jobsForCron } from './cron.js';
 
 const schedule = validateSchedule(scheduleJson);
 const deps = defaultDeps();
@@ -17,15 +17,14 @@ export default {
 
   async scheduled(event, env, ctx) {
     const now = new Date(event.scheduledTime);
-    const job = jobForCron(event.cron, now, env.TZ || schedule.timezone);
-    if (job === 'roster') {
-      const result = await deps.runRosterSync(env, schedule, now);
-      console.log(`roster sync: ${result.outcome}`, JSON.stringify(result));
-      return;
-    }
-    if (job === 'rollup') {
-      const result = await deps.runRollup(env, schedule, now);
-      console.log(`rollup push: ${result.outcome}`, JSON.stringify(result));
+    for (const job of jobsForCron(event.cron, now, env.TZ || schedule.timezone)) {
+      if (job === 'roster') {
+        const result = await deps.runRosterSync(env, schedule, now);
+        console.log(`roster sync: ${result.outcome}`, JSON.stringify(result));
+      } else if (job === 'rollup') {
+        const result = await deps.runRollup(env, schedule, now);
+        console.log(`rollup push: ${result.outcome}`, JSON.stringify(result));
+      }
     }
   },
 };

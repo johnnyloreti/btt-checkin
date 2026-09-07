@@ -14,11 +14,11 @@ TZ = "America/New_York"
 MEMBER_TAGS = "founding-member"
 MEMBER_TAG_PREFIXES = "foundations-"
 
-# Cron runs in UTC. Roster sync every 30 min. Rollup fires at both 07:00 and
-# 08:00 UTC; the scheduled handler runs it only when the ET hour is 3, so it
-# lands at 03:00 ET year-round across DST.
+# One trigger every 30 minutes drives both jobs. The handler runs the
+# roster sync on every tick and the rollup on the tick that is 03:00 ET.
+# Workers Free allows 5 cron triggers per account, so this uses one.
 [triggers]
-crons = ["*/30 * * * *", "0 7 * * *", "0 8 * * *"]
+crons = ["*/30 * * * *"]
 
 # Kiosk and staff pages plus their JS live in public/. The Worker runs first
 # so it decides what is served (the staff page is gated) and everything

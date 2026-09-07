@@ -1,18 +1,20 @@
-// cron.js — map a cron firing to a job. Cron runs in UTC; the rollup is
-// registered at two UTC hours so one of them is 03:00 ET whatever DST is
-// doing, and the other is skipped.
+// cron.js — map a cron firing to the jobs it should run.
+// One trigger, every 30 minutes, drives both jobs: the roster sync runs on
+// every tick, and the rollup runs on the tick that lands at 03:00 in the
+// gym's timezone. One schedule keeps the Worker inside the Workers Free
+// limit of 5 cron triggers per account, and DST needs no redeploy.
 
 import { localParts } from './time.js';
 
-export const ROSTER_CRON = '*/30 * * * *';
-export const ROLLUP_CRONS = ['0 7 * * *', '0 8 * * *'];
+export const TICK_CRON = '*/30 * * * *';
 export const ROLLUP_HOUR_LOCAL = 3;
+export const ROLLUP_MINUTE_LOCAL = 0;
 
-/** Returns 'roster' | 'rollup' | null. */
-export function jobForCron(cron, now, tz) {
-  if (cron === ROSTER_CRON) return 'roster';
-  if (ROLLUP_CRONS.includes(cron)) {
-    return localParts(now, tz).hour === ROLLUP_HOUR_LOCAL ? 'rollup' : null;
-  }
-  return null;
+/** Returns the jobs to run, in order: [] | ['roster'] | ['roster', 'rollup']. */
+export function jobsForCron(cron, now, tz) {
+  if (cron !== TICK_CRON) return [];
+  const local = localParts(now, tz);
+  const jobs = ['roster'];
+  if (local.hour === ROLLUP_HOUR_LOCAL && local.minute === ROLLUP_MINUTE_LOCAL) jobs.push('rollup');
+  return jobs;
 }
