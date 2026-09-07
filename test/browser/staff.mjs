@@ -89,10 +89,10 @@ await step('class roster: empty, then add a student via search, then remove with
   await page.waitForSelector('#add-overlay.active');
   await page.fill('#add-search', 'ja');
   await page.waitForSelector('#add-tiles .tile');
-  await page.click('#add-tiles .tile:has-text("Jack S.")');
+  await page.click('#add-tiles .tile:has-text("Jack Silva")');
   await page.waitForSelector('#class-list .row');
   const row = await page.locator('#class-list .row').first().textContent();
-  assert.match(row, /Jack S\./);
+  assert.match(row, /Jack Silva/);
   assert.match(row, /11:05 AM/);
   assert.match(row, /staff/);
   await page.screenshot({ path: join(OUT, 'staff-class.png') });
@@ -108,7 +108,7 @@ await step('class roster: empty, then add a student via search, then remove with
 await step('back to Tonight reflects the count', async () => {
   await page.click('#add-student');
   await page.fill('#add-search', 'emma');
-  await page.click('#add-tiles .tile:has-text("Emma J.")');
+  await page.click('#add-tiles .tile:has-text("Emma Jones")');
   await page.waitForSelector('#class-list .row');
   await page.click('#class-back');
   await page.waitForFunction(() => /1 checked in/.test(document.querySelector('#tonight-list .row[data-name="Kids 6-9"]').textContent));
@@ -117,7 +117,7 @@ await step('members: search, open, see lifetime and history', async () => {
   await page.click('.tab[data-tab="members"]');
   await page.fill('#member-search', 'emma');
   await page.waitForSelector('#member-tiles .tile');
-  await page.click('#member-tiles .tile:has-text("Emma J.")');
+  await page.click('#member-tiles .tile:has-text("Emma Jones")');
   await page.waitForSelector('#member.active');
   assert.equal(await page.locator('#member-title').textContent(), 'Emma Jones');
   const facts = await page.locator('#member-facts').textContent();

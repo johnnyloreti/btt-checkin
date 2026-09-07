@@ -19,16 +19,16 @@ const OUT = process.argv[2] || join(ROOT, '.screenshots');
 mkdirSync(OUT, { recursive: true });
 
 const ROSTER = [
-  { id: 'aaaaaaaaaaaaaaaaaaaa', first: 'Jack', lastInitial: 'S', lastKey: 'silv', program: 'Kids 6-9', programs: ['kids-6-9'] },
+  { id: 'aaaaaaaaaaaaaaaaaaaa', first: 'Jack', last: 'Silva', program: 'Kids 6-9', programs: ['kids-6-9'] },
   // Two programs both in the mocked window so the two-button confirm screen renders.
-  { id: 'bbbbbbbbbbbbbbbbbbbb', first: 'Leo', lastInitial: 'O', lastKey: 'orti', program: 'Kids 6-9 / Kids 10-14', programs: ['kids-6-9', 'kids-10-14'] },
-  { id: 'cccccccccccccccccccc', first: 'María', lastInitial: 'N', lastKey: 'nune', program: 'Adult', programs: ['adult'] },
-  { id: 'dddddddddddddddddddd', first: 'Jamie', lastInitial: 'B', lastKey: 'bake', program: 'Kids 3-5', programs: ['kids-3-5'] },
-  { id: 'eeeeeeeeeeeeeeeeeeee', first: 'Jaden', lastInitial: 'A', lastKey: 'adam', program: 'Kids 3-5', programs: ['kids-3-5'] },
-  { id: 'ffffffffffffffffffff', first: 'Jasmine', lastInitial: 'K', lastKey: 'kim', program: 'Kids 6-9', programs: ['kids-6-9'] },
-  { id: '11111111111111111111', first: 'Jax', lastInitial: 'T', lastKey: 'tan', program: 'Kids 6-9', programs: ['kids-6-9'] },
-  { id: '22222222222222222222', first: 'Jayden', lastInitial: 'R', lastKey: 'ross', program: 'Kids 6-9', programs: ['kids-6-9'] },
-  { id: '33333333333333333333', first: 'Jake', lastInitial: 'M', lastKey: 'mill', program: 'Adult', programs: ['adult'] },
+  { id: 'bbbbbbbbbbbbbbbbbbbb', first: 'Leo', last: 'Ortiz', program: 'Kids 6-9 / Kids 10-14', programs: ['kids-6-9', 'kids-10-14'] },
+  { id: 'cccccccccccccccccccc', first: 'María', last: 'Núñez', program: 'Adult', programs: ['adult'] },
+  { id: 'dddddddddddddddddddd', first: 'Jamie', last: 'Baker', program: 'Kids 3-5', programs: ['kids-3-5'] },
+  { id: 'eeeeeeeeeeeeeeeeeeee', first: 'Jaden', last: 'Adams', program: 'Kids 3-5', programs: ['kids-3-5'] },
+  { id: 'ffffffffffffffffffff', first: 'Jasmine', last: 'Kim', program: 'Kids 6-9', programs: ['kids-6-9'] },
+  { id: '11111111111111111111', first: 'Jax', last: 'Tan', program: 'Kids 6-9', programs: ['kids-6-9'] },
+  { id: '22222222222222222222', first: 'Jayden', last: 'Ross', program: 'Kids 6-9', programs: ['kids-6-9'] },
+  { id: '33333333333333333333', first: 'Jake', last: 'Miller', program: 'Adult', programs: ['adult'] },
 ];
 // Sat 11:00 ET: Kids 6-9 (11:00) and Kids 10-14 (11:45) are in window; adults are not.
 const CURRENT = {
@@ -101,21 +101,21 @@ await step('home: input focused, no tiles under 2 chars', async () => {
   await page.fill('#name-input', 'j');
   assert.equal(await page.locator('.tile').count(), 0);
 });
-await step('search: "ja" shows at most 6 tiles with first name, last initial, program', async () => {
+await step('search: "ja" shows at most 6 tiles with first and last name, program', async () => {
   await page.fill('#name-input', 'ja');
   await page.waitForSelector('.tile');
   const tiles = await page.locator('.tile').allTextContents();
   assert.equal(tiles.length, 6, `got ${tiles.length}`);
-  assert.match(tiles[0], /Jack S\./);
+  assert.match(tiles[0], /Jack Silva/);
   assert.match(tiles[0], /Kids 6-9/);
   await page.screenshot({ path: join(OUT, 'ipad-search.png') });
 });
 await step('confirm: Jack pre-selects Kids 6-9 at 11:00 AM', async () => {
-  await page.click('.tile:has-text("Jack S.")');
+  await page.click('.tile:has-text("Jack Silva")');
   await page.waitForSelector('#checkin');
   const line = await page.locator('#confirm .class-line').textContent();
   assert.match(line, /Kids 6-9\s*11:00 AM/);
-  assert.equal(await page.locator('#confirm-name').textContent(), 'Jack S.');
+  assert.equal(await page.locator('#confirm-name').textContent(), 'Jack Silva');
   assert.equal(await page.locator('#confirm-program').textContent(), 'Kids 6-9');
   await page.screenshot({ path: join(OUT, 'ipad-confirm.png') });
 });
@@ -134,7 +134,7 @@ await step('success: shows class, time, and Class #1, then returns home', async 
 });
 await step('duplicate: second tap still shows the success screen', async () => {
   await page.fill('#name-input', 'jack');
-  await page.click('.tile:has-text("Jack S.")');
+  await page.click('.tile:has-text("Jack Silva")');
   await page.click('#checkin');
   await page.waitForSelector('#success.active');
   assert.equal(await page.locator('#success-count').textContent(), 'Class #1');
@@ -142,7 +142,7 @@ await step('duplicate: second tap still shows the success screen', async () => {
 });
 await step('two programs: Leo sees two large buttons', async () => {
   await page.fill('#name-input', 'leo');
-  await page.click('.tile:has-text("Leo O.")');
+  await page.click('.tile:has-text("Leo Ortiz")');
   await page.waitForSelector('#confirm .btn[data-class]');
   const labels = await page.locator('#confirm .btn[data-class]').allTextContents();
   assert.equal(labels.length, 2);
@@ -156,7 +156,7 @@ await step('two programs: Leo sees two large buttons', async () => {
 });
 await step('no class: María (adult) gets "Check in anyway" and records open mat', async () => {
   await page.fill('#name-input', 'nun');
-  await page.click('.tile:has-text("María N.")');
+  await page.click('.tile:has-text("María Núñez")');
   await page.waitForSelector('#checkin-anyway');
   assert.match(await page.locator('#confirm .class-line').textContent(), /No class right now/);
   await page.screenshot({ path: join(OUT, 'ipad-no-class.png') });
@@ -169,7 +169,7 @@ await step('no class: María (adult) gets "Check in anyway" and records open mat
 });
 await step('back button returns home', async () => {
   await page.fill('#name-input', 'jam');
-  await page.click('.tile:has-text("Jamie B.")');
+  await page.click('.tile:has-text("Jamie Baker")');
   await page.click('#back');
   await page.waitForSelector('#home.active');
 });
@@ -177,7 +177,7 @@ await step('offline: failed POST still shows success and queues with its origina
   state.failCheckins = true;
   const before = state.checkins.length;
   await page.fill('#name-input', 'jas');
-  await page.click('.tile:has-text("Jasmine K.")');
+  await page.click('.tile:has-text("Jasmine Kim")');
   await page.click('#checkin');
   await page.waitForSelector('#success.active');
   assert.equal(await page.locator('#success-class').textContent(), 'Kids 6-9, 11:00 AM');
@@ -219,7 +219,7 @@ await step('phone: search and confirm fit the viewport without horizontal scroll
   assert.equal(wide, false, 'horizontal overflow');
   const scrolls = await p2.evaluate(() => { const h = document.getElementById('home'); return h.scrollHeight > h.clientHeight && getComputedStyle(h).overflowY === 'auto'; });
   assert.equal(scrolls, true, 'tile list scrolls on a phone');
-  await p2.click('.tile:has-text("Jack S.")');
+  await p2.click('.tile:has-text("Jack Silva")');
   await p2.waitForSelector('#checkin');
   const box = await p2.locator('#checkin').boundingBox();
   const vh = await p2.evaluate(() => window.innerHeight);

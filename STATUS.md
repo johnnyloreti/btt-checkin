@@ -20,8 +20,8 @@
 
 ## Decisions made without you (confirm or say otherwise)
 
-1. **Check-in window.** Implemented as 45 minutes before class start to 15 minutes after. The brief's wording could read the other way round. The two constants are at the top of `src/classes.js`.
-2. **Last-name search.** The public roster ships `lastKey`, the first four normalized letters of the last name, so "silva" still finds Jack S. The kiosk never receives a full last name.
+1. **Check-in window.** 2 hours before class start to 20 minutes after, per Johnny on 2026-09-06. The two constants are at the top of `src/classes.js`. With a 2 hour lead, every class of the day is usually in the window at once; the member's program tag is what picks the class, so this is fine.
+2. **Full names on tiles.** Per Johnny on 2026-09-06, tiles and the confirm screen show first and last name. The public roster JSON therefore carries last names. It still carries no contact ids, status, or contact details, and it is rate-limited, but anyone who finds the URL can list member names. If that ever matters, the fix is a server-side search route.
 3. **Voided rows come back.** If staff remove someone and that person then checks in again for the same class, the row is set back to attended. Staff see the new tap time.
 4. **Open mat.** "Check in anyway" records `open mat / unscheduled` at `T00:00` for that date, once per member per day.
 5. **Inactive members** appear on the kiosk and can check in. The record carries `status_at_checkin = inactive`. Staff see an inactive tag on the roster row.

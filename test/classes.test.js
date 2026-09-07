@@ -35,21 +35,22 @@ test('classesOn lists the day in start order with startLocal', () => {
   assert.deepEqual(classesOn(schedule, '2026-09-11'), []); // Friday
 });
 
-test('window edges: 45 minutes before is in, 46 is out; 15 after is in, 16 is out', () => {
+test('window edges: 2 hours before is in, 121 minutes is out; 20 after is in, 21 is out', () => {
   // Tue Kids 3-5 at 16:00.
-  assert.deepEqual(names(matchClasses(schedule, edt('2026-09-08T15:15'), TZ)), ['Kids 3-5@16:00']);
-  assert.deepEqual(names(matchClasses(schedule, edt('2026-09-08T15:14'), TZ)), []);
-  assert.deepEqual(names(matchClasses(schedule, edt('2026-09-08T16:15'), TZ)), ['Kids 3-5@16:00', 'Kids 6-9@16:30']);
-  assert.ok(!names(matchClasses(schedule, edt('2026-09-08T16:16'), TZ)).includes('Kids 3-5@16:00'));
+  assert.deepEqual(names(matchClasses(schedule, edt('2026-09-08T14:00'), TZ)), ['Kids 3-5@16:00']);
+  assert.deepEqual(names(matchClasses(schedule, edt('2026-09-08T13:59'), TZ)), []);
+  assert.deepEqual(names(matchClasses(schedule, edt('2026-09-08T16:20'), TZ)), ['Kids 3-5@16:00', 'Kids 6-9@16:30', 'Kids 10-14@17:15', 'Adult BJJ@18:15']);
+  assert.ok(!names(matchClasses(schedule, edt('2026-09-08T16:21'), TZ)).includes('Kids 3-5@16:00'));
 });
 
 test('back-to-back kids classes both match; program tag must disambiguate', () => {
   const r = matchClasses(schedule, edt('2026-09-08T16:40'), TZ);
-  assert.deepEqual(names(r), ['Kids 6-9@16:30', 'Kids 10-14@17:15']);
+  assert.deepEqual(names(r), ['Kids 6-9@16:30', 'Kids 10-14@17:15', 'Adult BJJ@18:15']);
   const byProgram = (p) => r.matches.filter((m) => m.program === p).map((m) => m.name);
   assert.deepEqual(byProgram('kids-6-9'), ['Kids 6-9']);
   assert.deepEqual(byProgram('kids-10-14'), ['Kids 10-14']);
-  assert.deepEqual(byProgram('adult'), []);
+  assert.deepEqual(byProgram('adult'), ['Adult BJJ']);
+  assert.deepEqual(byProgram('kids-3-5'), [], 'Kids 3-5 closed at 16:20');
   assert.equal(r.matches[0].startsInMin, -10);
   assert.equal(r.matches[1].startsInMin, 35);
 });
@@ -72,27 +73,27 @@ test('Wednesday is No-Gi for adults, kids keep their names', () => {
   assert.deepEqual(names(r), ['Adult No-Gi@18:15']);
   assert.equal(r.weekday, 'Wed');
   const kids = matchClasses(schedule, edt('2026-09-09T16:30'), TZ);
-  assert.deepEqual(names(kids), ['Kids 6-9@16:30', 'Kids 10-14@17:15']);
+  assert.deepEqual(names(kids), ['Kids 6-9@16:30', 'Kids 10-14@17:15', 'Adult No-Gi@18:15']);
 });
 
 test('Saturday schedule', () => {
   const r = matchClasses(schedule, edt('2026-09-05T10:50'), TZ);
-  assert.deepEqual(names(r), ['Kids 6-9@11:00']);
+  assert.deepEqual(names(r), ['Kids 3-5@10:30', 'Kids 6-9@11:00', 'Kids 10-14@11:45']);
   assert.equal(r.nowLocal, '2026-09-05T10:50');
-  assert.deepEqual(names(matchClasses(schedule, edt('2026-09-05T11:00'), TZ)), ['Kids 6-9@11:00', 'Kids 10-14@11:45']);
-  assert.deepEqual(names(matchClasses(schedule, edt('2026-09-05T10:40'), TZ)), ['Kids 3-5@10:30', 'Kids 6-9@11:00']);
+  assert.deepEqual(names(matchClasses(schedule, edt('2026-09-05T11:00'), TZ)), ['Kids 6-9@11:00', 'Kids 10-14@11:45', 'Adult BJJ@13:00']);
+  assert.deepEqual(names(matchClasses(schedule, edt('2026-09-05T08:30'), TZ)), ['Kids 3-5@10:30']);
   assert.equal(r.date, '2026-09-05');
   assert.deepEqual(names(matchClasses(schedule, edt('2026-09-05T12:30'), TZ)), ['Adult BJJ@13:00']);
 });
 
 test('DST: the week before and after fall-back both resolve 16:30 ET', () => {
   // 2026-11-01 is fall-back. Tue Oct 27 is EDT, Tue Nov 3 is EST.
-  assert.deepEqual(names(matchClasses(schedule, edt('2026-10-27T16:30'), TZ)), ['Kids 6-9@16:30', 'Kids 10-14@17:15']);
-  assert.deepEqual(names(matchClasses(schedule, est('2026-11-03T16:30'), TZ)), ['Kids 6-9@16:30', 'Kids 10-14@17:15']);
+  assert.deepEqual(names(matchClasses(schedule, edt('2026-10-27T16:30'), TZ)), ['Kids 6-9@16:30', 'Kids 10-14@17:15', 'Adult BJJ@18:15']);
+  assert.deepEqual(names(matchClasses(schedule, est('2026-11-03T16:30'), TZ)), ['Kids 6-9@16:30', 'Kids 10-14@17:15', 'Adult BJJ@18:15']);
   // Same UTC instant on both days would be a different ET hour; the code must not assume a fixed offset.
   const nov = matchClasses(schedule, new Date('2026-11-03T20:30:00Z'), TZ); // 15:30 EST
   assert.equal(nov.nowLocal, '2026-11-03T15:30');
-  assert.deepEqual(names(nov), ['Kids 3-5@16:00']);
+  assert.deepEqual(names(nov), ['Kids 3-5@16:00', 'Kids 6-9@16:30', 'Kids 10-14@17:15']);
 });
 
 test('DST: spring-forward Sunday has no classes, the following Tuesday works', () => {
@@ -100,7 +101,7 @@ test('DST: spring-forward Sunday has no classes, the following Tuesday works', (
   assert.deepEqual(names(matchClasses(schedule, new Date('2026-03-08T15:00:00Z'), TZ)), []);
   const tue = matchClasses(schedule, new Date('2026-03-10T20:30:00Z'), TZ); // 16:30 EDT
   assert.equal(tue.nowLocal, '2026-03-10T16:30');
-  assert.deepEqual(names(tue), ['Kids 6-9@16:30', 'Kids 10-14@17:15']);
+  assert.deepEqual(names(tue), ['Kids 6-9@16:30', 'Kids 10-14@17:15', 'Adult BJJ@18:15']);
 });
 
 test('validateClassChoice accepts a real class on its day and rejects the rest', () => {

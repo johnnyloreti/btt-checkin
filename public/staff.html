@@ -117,7 +117,7 @@
 <div id="toast" class="toast"></div>
 
 <script type="module">
-  import { search, formatTime } from '/search.js';
+  import { search, formatTime, displayName } from '/search.js';
 
   const $ = (id) => document.getElementById(id);
   const UNSCHEDULED = 'open mat / unscheduled';
@@ -156,7 +156,6 @@
     const t = new Date(Date.UTC(y, m - 1, d + days));
     return `${t.getUTCFullYear()}-${String(t.getUTCMonth() + 1).padStart(2, '0')}-${String(t.getUTCDate()).padStart(2, '0')}`;
   }
-  function nameOf(m) { return `${m.first} ${m.lastInitial ? m.lastInitial + '.' : ''}`.trim(); }
   function el(tag, cls, text) {
     const e = document.createElement(tag);
     if (cls) e.className = cls;
@@ -247,7 +246,7 @@
     for (const r of data.rows) {
       const row = el('div', 'row');
       row.dataset.attendanceId = r.attendanceId;
-      row.append(el('span', 'check', '✓'), el('span', 'name', `${r.first} ${r.last ? r.last[0] + '.' : ''}`), el('span', 'time', fmtClock(r.checkedInAt)));
+      row.append(el('span', 'check', '✓'), el('span', 'name', displayName(r)), el('span', 'time', fmtClock(r.checkedInAt)));
       if (r.method === 'staff') row.appendChild(el('span', 'tag', 'staff'));
       if (r.statusAtCheckin === 'inactive') row.appendChild(el('span', 'tag warn', 'inactive'));
       const rm = el('button', 'remove', 'Remove');
@@ -296,7 +295,7 @@
       const t = el('button', 'tile');
       t.type = 'button';
       t.dataset.id = m.id;
-      t.append(el('div', 'n', nameOf(m)), el('div', 'p', m.program || ''));
+      t.append(el('div', 'n', displayName(m)), el('div', 'p', m.program || ''));
       t.addEventListener('click', () => onPick(m));
       container.appendChild(t);
     }

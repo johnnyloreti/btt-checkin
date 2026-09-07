@@ -74,7 +74,7 @@ Check in
 Rules:
 
 - Search matches on first name prefix, last name prefix, or "first last" prefix. Case-insensitive. Diacritics stripped.
-- Results appear after 2 characters. Max 6 tiles. Tile shows **first name + last initial** and program label (Kids 3-5 / Kids 6-9 / Kids 10-14 / Adult). Nothing else.
+- Results appear after 2 characters. Max 6 tiles. Tile shows **first name + last name** and program label (Kids 3-5 / Kids 6-9 / Kids 10-14 / Adult). Nothing else. (Changed from last initial to full last name by Johnny, 2026-09-06.)
 - Tapping a tile shows the confirm screen:
 
 ```
@@ -86,7 +86,7 @@ Kids 6-9  4:30 PM
 [ CHECK IN ]
 ```
 
-- The class is **pre-selected** from `schedule.json`: the class for this member's program whose start time is within the window (`-45 min` to `+15 min` of now, ET). If exactly one matches, show it. Kids classes stack back to back on weekdays, so the program tag is what disambiguates; the window alone never decides. If two match (a member with two program tags, e.g. a 14-year-old approved for adult), show both as large buttons. If none match, show "No class right now" and a single button "Check in anyway" that records attendance with `class_name = "open mat / unscheduled"`.
+- The class is **pre-selected** from `schedule.json`: the class for this member's program whose start time is within the window: from **2 hours before** start to **20 minutes after** start, ET. (Changed from 45 / 15 by Johnny, 2026-09-06.) If exactly one matches, show it. Kids classes stack back to back on weekdays, so the program tag is what disambiguates; the window alone never decides. If two match (a member with two program tags, e.g. a 14-year-old approved for adult), show both as large buttons. If none match, show "No class right now" and a single button "Check in anyway" that records attendance with `class_name = "open mat / unscheduled"`.
 - Tap CHECK IN. Success screen for 3 seconds, then back to home:
 
 ```
@@ -250,7 +250,7 @@ Johnny creates these five custom fields in GHL (Settings, Custom Fields, contact
 GET  /                    kiosk page
 GET  /staff               staff page (PIN gate)
 POST /api/staff/login     { pin } → cookie
-GET  /api/roster          [{ id, first, lastInitial, program }]   (public, minimal)
+GET  /api/roster          [{ id, first, last, program, programs }]   (public, minimal)
 GET  /api/current-class   { now, matches: [...] }  computed server-side from schedule.json
 POST /api/checkin         { contactId, classStartLocal, className, clientTs }  (public)
 GET  /api/staff/today     classes + counts        (PIN)

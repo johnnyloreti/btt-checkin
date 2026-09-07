@@ -4,9 +4,9 @@
 import { localParts, pad } from './time.js';
 import { parseTime } from './schedule.js';
 
-/** Check-in window: from EARLY_MIN before start to LATE_MIN after. */
-export const EARLY_MIN = 45;
-export const LATE_MIN = 15;
+/** Check-in window: from EARLY_MIN before start to LATE_MIN after. Johnny set 2 h / 20 min on 2026-09-06. */
+export const EARLY_MIN = 120;
+export const LATE_MIN = 20;
 
 export const UNSCHEDULED_CLASS = 'open mat / unscheduled';
 

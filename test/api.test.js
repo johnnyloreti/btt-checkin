@@ -32,24 +32,21 @@ async function setup(now = SAT_1055) {
   return { env, app, get, post };
 }
 
-test('GET /api/roster returns opaque ids, first names, last initials, program labels only', async () => {
+test('GET /api/roster returns opaque ids, names, program labels only', async () => {
   const { get } = await setup();
   const res = await get('/api/roster');
   assert.equal(res.status, 200);
   const roster = await res.json();
   assert.equal(roster.length, 7);
   const jack = roster.find((r) => r.first === 'Jack');
-  assert.deepEqual(jack, { id: await opaqueId('c_jack', SALT), first: 'Jack', lastInitial: 'S', lastKey: 'silv', program: 'Kids 6-9', programs: ['kids-6-9'] });
-  const maria = roster.find((r) => r.first === 'María');
-  assert.equal(maria.lastKey, 'nune', 'diacritics stripped, truncated');
+  assert.deepEqual(jack, { id: await opaqueId('c_jack', SALT), first: 'Jack', last: 'Silva', program: 'Kids 6-9', programs: ['kids-6-9'] });
   const leo = roster.find((r) => r.first === 'Leo');
   assert.equal(leo.program, 'Kids 10-14 / Adult');
   assert.deepEqual(leo.programs, ['kids-10-14', 'adult']);
   const text = JSON.stringify(roster);
   assert.doesNotMatch(text, /c_[a-z]+/, 'no GHL contact ids');
   assert.doesNotMatch(text, /@|phone|billing|active|inactive/i);
-  for (const r of roster) assert.deepEqual(Object.keys(r).sort(), ['first', 'id', 'lastInitial', 'lastKey', 'program', 'programs']);
-  for (const r of roster) assert.ok(r.lastKey.length <= 4, 'never a full last name');
+  for (const r of roster) assert.deepEqual(Object.keys(r).sort(), ['first', 'id', 'last', 'program', 'programs']);
 });
 
 test('GET /api/roster fails closed without ID_SALT', async () => {
@@ -69,9 +66,9 @@ test('GET /api/current-class computes matches server-side, with ?at for testing'
   const { get } = await setup();
   const live = await (await get('/api/current-class')).json();
   assert.equal(live.nowLocal, '2026-09-05T10:55');
-  assert.deepEqual(live.matches.map((m) => m.name), ['Kids 6-9']); // 3-5 closed at 10:45, 10-14 opens at 11:00
+  assert.deepEqual(live.matches.map((m) => m.name), ['Kids 6-9', 'Kids 10-14']); // 3-5 closed at 10:50, Adult opens at 11:00
   assert.equal(live.matches[0].startLocal, '2026-09-05T11:00');
-  assert.deepEqual(live.window, { earlyMin: 45, lateMin: 15 });
+  assert.deepEqual(live.window, { earlyMin: 120, lateMin: 20 });
 
   const at = await (await get('/api/current-class?at=2026-09-08T22:00:00Z')).json(); // Tue 18:00 ET
   assert.deepEqual(at.matches.map((m) => m.name), ['Adult BJJ']);

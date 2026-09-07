@@ -11,11 +11,9 @@ import { allowRequest, PUBLIC, LOGIN } from './ratelimit.js';
 import { recordCheckin } from './checkin.js';
 import { today, classRoster, voidAttendance, memberHistory } from './staff.js';
 import { localParts } from './time.js';
-import { normalize } from '../public/search.js';
 
 /** Static files the Worker will hand to the assets binding. Everything else is 404. */
 const PUBLIC_ASSETS = new Set(['/', '/index.html', '/search.js', '/logo.png', '/favicon.ico']);
-const LAST_KEY_CHARS = 4;
 
 export function json(body, status = 200, headers = {}) {
   return new Response(JSON.stringify(body), {
@@ -69,10 +67,10 @@ export async function health(env, schedule) {
 }
 
 /**
- * Public roster: opaque id, first name, last initial, program label(s),
- * program keys, and lastKey: the first few normalized letters of the last
- * name so the kiosk can match a last-name prefix without shipping full
- * last names. Nothing else (§2, §7).
+ * Public roster: opaque id, first name, last name, program label(s),
+ * program keys. Nothing else. Johnny chose full last names on the tiles
+ * on 2026-09-06, so the roster carries them; it still never carries
+ * contact ids, status, or contact details.
  */
 export async function publicRoster(env, schedule) {
   const salt = requireSalt(env);
@@ -91,8 +89,7 @@ export async function publicRoster(env, schedule) {
     out.push({
       id: await opaqueId(row.ghl_contact_id, salt),
       first: row.first_name,
-      lastInitial: row.last_name ? row.last_name[0].toUpperCase() : '',
-      lastKey: normalize(row.last_name).slice(0, LAST_KEY_CHARS),
+      last: row.last_name || '',
       program: programs.map((p) => schedule.programs[p].label).join(' / '),
       programs,
     });
