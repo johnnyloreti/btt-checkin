@@ -37,7 +37,7 @@ test('GET /api/roster returns opaque ids, names, program labels only', async () 
   const res = await get('/api/roster');
   assert.equal(res.status, 200);
   const roster = await res.json();
-  assert.equal(roster.length, 7);
+  assert.equal(roster.length, 9);
   const jack = roster.find((r) => r.first === 'Jack');
   assert.deepEqual(jack, { id: await opaqueId('c_jack', SALT), first: 'Jack', last: 'Silva', program: 'Kids 6-9', programs: ['kids-6-9'] });
   const leo = roster.find((r) => r.first === 'Leo');
@@ -96,7 +96,7 @@ test('POST /api/checkin records attendance and the duplicate guard holds', async
   assert.equal(rows[0].ghl_contact_id, 'c_jack', 'stored under the real GHL id');
   assert.equal(rows[0].method, 'kiosk');
   assert.equal(env.DB.raw.prepare('SELECT ghl_contact_id FROM pending_rollups').get().ghl_contact_id, 'c_jack');
-  assert.equal((await (await get('/health')).json()).memberCount, 7);
+  assert.equal((await (await get('/health')).json()).memberCount, 9);
 });
 
 test('POST /api/checkin rejects unknown ids, bad bodies, and bad classes', async () => {

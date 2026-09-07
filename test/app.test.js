@@ -36,11 +36,11 @@ test('POST /api/staff/sync with the PIN runs the sync and /health reflects it', 
   assert.equal(res.status, 200);
   const body = await res.json();
   assert.equal(body.outcome, 'ok');
-  assert.equal(body.members, 7);
+  assert.equal(body.members, 9);
 
   const h = await (await app.fetch(new Request('https://x.test/health'), env)).json();
   assert.equal(h.ok, true);
-  assert.equal(h.memberCount, 7);
+  assert.equal(h.memberCount, 9);
   assert.equal(h.lastRosterOutcome, 'ok');
   assert.ok(h.lastRosterSync);
 });

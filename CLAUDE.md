@@ -221,7 +221,7 @@ Every check-in inserts into `pending_rollups` so the nightly job only touches co
 **Location:** `ARCSFhJ0JlkcuzfZtyEJ`.
 
 **Roster sync (every 30 min):**
-- `GET /contacts/` and paginate fully. A contact is a member if it carries **any** of: the tag `founding-member`, or any tag starting with `foundations-` (currently `foundations-sept` and `foundations-oct`; future cohorts follow the same prefix and need no code change).
+- `GET /contacts/` and paginate fully. A contact is a member if it carries **any** of: a `program:*` tag from `schedule.json`, the tag `founding-member`, or any tag starting with `foundations-` (currently `foundations-sept` and `foundations-oct`; future cohorts follow the same prefix and need no code change). (Program tag alone added by Johnny, 2026-09-07: not everyone enrolls through Foundations.) A tag that starts with `program:` but matches nothing in the schedule is flagged by name as a likely typo.
 - `programs` from tags: each `program:*` tag that matches a key in `schedule.json` is added. Rules for contacts with no `program:*` tag:
   - has a `foundations-*` tag → `["adult"]`, no flag needed (Foundations is the adult program)
   - has only `founding-member` → `["adult"]` **and flagged** in `sync_log` detail by name, because founding members include kids and the kiosk cannot match them to a kids class until Johnny tags them.
