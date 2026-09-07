@@ -140,9 +140,33 @@ wrangler dev --local
 ```
 The GHL calls will fail locally unless `.dev.vars` carries a real token. Everything else works against the local D1.
 
-## Custom hostname (later)
+## Custom hostname
 
-Once stable, add a CNAME for `checkin.bttbridgewater.com` at Spaceship pointing at the Worker and add a custom domain to the Worker in the Cloudflare dashboard. The cookie is marked Secure, so the staff page needs HTTPS, which both hostnames have.
+DNS for bttbridgewater.com lives at Spaceship and the site is on Netlify, so
+`checkin.bttbridgewater.com` is served by Netlify proxying to the Worker
+rather than by a Cloudflare custom domain. Pieces:
+
+1. Spaceship: CNAME `checkin` to the Netlify site.
+2. Netlify: add `checkin.bttbridgewater.com` as a domain alias.
+3. Site repo `netlify.toml`:
+```
+[[redirects]]
+  from = "https://checkin.bttbridgewater.com/*"
+  to = "https://btt-checkin.black-term-300b.workers.dev/:splat"
+  status = 200
+  force = true
+  headers = { X-Proxy-Key = "<same value as the PROXY_KEY secret>" }
+```
+4. Worker: `wrangler secret put PROXY_KEY` with that value. With it, the
+   public routes rate-limit by the real visitor address Netlify forwards
+   instead of by Netlify's own address. Without it everything still works,
+   but all proxied visitors share one bucket. Staff login never trusts the
+   forwarded address, so a leaked key cannot help brute-force the PIN.
+   Keeping the key out of the public site repo (a Netlify env var read by
+   an edge function) is nicer but not required.
+
+The workers.dev address keeps working alongside. If DNS ever moves to
+Cloudflare, replace all of this with a Custom Domain on the Worker.
 
 ## Not built (V2, per §10 and §13)
 
