@@ -1,7 +1,7 @@
 # btt-checkin STATUS
 
 **Last updated:** 2026-09-07
-**Build order (§10):** steps 1 through 7 complete. Deployed 2026-09-07 at `https://btt-checkin.black-term-300b.workers.dev` with the cron trigger active. Acceptance test passed the same day: kiosk check-in, staff roster, and a rollup that filled all five GHL fields. Logo in place.
+**Build order (§10):** steps 1 through 7 complete. Deployed 2026-09-07 at `https://btt-checkin.black-term-300b.workers.dev` with the cron trigger active. Acceptance test passed the same day: kiosk check-in, staff roster, and a rollup that filled all five GHL fields. Logo in place. Live at `https://checkin.bttbridgewater.com` via the Netlify proxy since 2026-09-07; both cron jobs confirmed running on their own.
 
 ## What is built
 
@@ -52,7 +52,6 @@
 - Confirm the four class durations in `schedule.json`.
 - iPad: Add to Home Screen, Guided Access, auto-lock off.
 - Consider Workers Paid ($5/month) for the request and D1 caps.
-- Custom hostname `checkin.bttbridgewater.com` once stable.
 
 ## Deploy (PowerShell, inside `C:\Users\Johnm\btt-checkin`)
 
