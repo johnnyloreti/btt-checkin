@@ -4,6 +4,7 @@
 import { syncRoster } from './roster.js';
 import { fetchAllContacts, fetchCustomFieldIds, ghlPutContactCustomFields } from './ghl.js';
 import { runRollup } from './rollup.js';
+import { notifyWaiverCheckin, waiverEnabled } from './waiver.js';
 import { isStaff, pinMatches, issueToken, cookieHeader, SESSION_MS } from './staff-auth.js';
 import { buildIdMap, opaqueId, requireSalt } from './ids.js';
 import { matchClasses } from './classes.js';
@@ -13,7 +14,7 @@ import { today, classRoster, voidAttendance, memberHistory } from './staff.js';
 import { localParts } from './time.js';
 
 /** Static files the Worker will hand to the assets binding. Everything else is 404. */
-const PUBLIC_ASSETS = new Set(['/', '/index.html', '/search.js', '/logo.png', '/favicon.ico']);
+const PUBLIC_ASSETS = new Set(['/', '/index.html', '/search.js', '/logo.png', '/waiver-qr.png', '/favicon.ico']);
 
 export function json(body, status = 200, headers = {}) {
   return new Response(JSON.stringify(body), {
@@ -101,7 +102,7 @@ export async function publicRoster(env, schedule) {
 export async function resolveMember(env, id) {
   if (typeof id !== 'string' || !/^[0-9a-f]{20}$/.test(id)) return null;
   const salt = requireSalt(env);
-  const { results } = await env.DB.prepare('SELECT ghl_contact_id, first_name, active FROM members').all();
+  const { results } = await env.DB.prepare('SELECT ghl_contact_id, first_name, active, waiver FROM members').all();
   const map = await buildIdMap(results, salt);
   return map.get(id) || null;
 }
@@ -133,6 +134,13 @@ export function defaultDeps() {
         putContact: (id, fields) => ghlPutContactCustomFields(env, id, fields),
         now,
       }),
+    notifyWaiver: (env, contactId, now) =>
+      notifyWaiverCheckin(
+        env,
+        { fetchFields: () => fetchCustomFieldIds(env), putContact: (id, fields) => ghlPutContactCustomFields(env, id, fields) },
+        contactId,
+        now,
+      ),
     now: () => new Date(),
   };
 }
@@ -141,7 +149,7 @@ export function createApp(schedule, deps = defaultDeps()) {
   const tz = schedule.timezone;
   const now = () => (deps.now ? deps.now() : new Date());
 
-  async function checkin(env, body, method) {
+  async function checkin(env, body, method, ctx) {
     const member = await resolveMember(env, body.contactId);
     if (!member) return json({ error: 'unknown member' }, 404);
     const at = now();
@@ -155,11 +163,23 @@ export function createApp(schedule, deps = defaultDeps()) {
       now: at,
       todayLocal: localParts(at, env.TZ || tz).date,
     });
-    return json(result.body, result.status);
+    if (!result.ok) return json(result.body, result.status);
+
+    // §15.1: waiver missing. Tell the kiosk, and nudge GHL after the response goes out.
+    const waiverNeeded = waiverEnabled(env) && Number(member.waiver ?? 1) === 0;
+    const body2 = { ...result.body, waiverNeeded };
+    if (waiverNeeded && !result.body.duplicate && deps.notifyWaiver) {
+      const task = deps.notifyWaiver(env, member.ghl_contact_id, at).then((r) => {
+        if (!r.ok) console.warn(`waiver nudge skipped for ${member.ghl_contact_id}: ${r.reason}`);
+      });
+      if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(task);
+      else await task;
+    }
+    return json(body2, result.status);
   }
 
   return {
-    async fetch(request, env) {
+    async fetch(request, env, ctx) {
       const url = new URL(request.url);
       const path = url.pathname.replace(/\/+$/, '') || '/';
       const method = request.method;
@@ -212,7 +232,7 @@ export function createApp(schedule, deps = defaultDeps()) {
         if (method === 'POST' && path === '/api/checkin') {
           const body = await readJson(request);
           if (!body) return json({ error: 'expected JSON body' }, 400);
-          return checkin(env, body, 'kiosk');
+          return checkin(env, body, 'kiosk', ctx);
         }
 
         // ---- staff API (PIN) ----
@@ -237,7 +257,7 @@ export function createApp(schedule, deps = defaultDeps()) {
           if (method === 'POST' && path === '/api/staff/add') {
             const body = await readJson(request);
             if (!body) return json({ error: 'expected JSON body' }, 400);
-            return checkin(env, body, 'staff');
+            return checkin(env, body, 'staff', ctx);
           }
           if (method === 'POST' && path === '/api/staff/void') {
             const body = await readJson(request);

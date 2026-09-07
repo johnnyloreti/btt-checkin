@@ -46,6 +46,22 @@
 4. Logo is in place at `public/logo.png`. The file name must stay lowercase; Cloudflare serves `logo.PNG` and `logo.png` as different files.
 5. Pick a 4-digit staff PIN and a long random `ID_SALT` (32 or more characters). Changing either later signs all staff out.
 
+## V2: waiver prompt (§15.1)
+
+Built 2026-09-07. Needs, in this order:
+
+1. GHL: make sure a signed waiver puts the tag `waiver-signed` on the **student's** contact (for kids, the child, not the parent). If your tag is named differently, change `WAIVER_TAG` in `wrangler.toml`.
+2. GHL: create a contact custom field with key `checkin_last_at` (text). Or change `WAIVER_FIELD`.
+3. GHL: a workflow with trigger "custom field checkin_last_at changed", condition "tag waiver-signed is absent", action: send the waiver text or email.
+4. `public/waiver-qr.png`: the waiver QR image, lowercase name. Without it the success screen shows the line and no code.
+5. D1 migration, once, before the deploy:
+```
+wrangler d1 execute btt-checkin --remote --file=src/db/migrations/002_waiver.sql
+```
+6. `wrangler deploy`, then one sync so the waiver flags fill in.
+
+What happens: a member without the tag still checks in. The success screen adds "One thing before class: sign the waiver" with the QR and stays up 12 seconds. The staff roster row shows "no waiver". The Worker writes `checkin_last_at` to that contact right away (the same allowed write as the rollup) and your GHL workflow sends the message. The Worker never sends messages itself. Empty `WAIVER_TAG` turns the whole feature off.
+
 ## Still open after go-live
 
 - Rotate `STAFF_PIN`; the first one was pasted into a chat.

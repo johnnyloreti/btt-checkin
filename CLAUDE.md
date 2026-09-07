@@ -360,7 +360,7 @@ First real use: check yourself in from the iPad, then open `/staff` and confirm 
 
 ## §13 Non-goals for V1
 
-Payment, billing state, waivers, class booking, reservations, QR codes, key tags, wallet passes, belt tracking, promotions, family accounts, member portal, push notifications, native apps, GHL Custom Objects, reading GHL calendars, any write to GHL other than the five rollup fields, anything that touches `btt-ops`.
+Payment, billing state, waivers (the waiver prompt in §15 is the one exception, approved for V2 on 2026-09-07), class booking, reservations, QR codes, key tags, wallet passes, belt tracking, promotions, family accounts, member portal, push notifications, native apps, GHL Custom Objects, reading GHL calendars, any write to GHL other than the five rollup fields, anything that touches `btt-ops`.
 
 ---
 
@@ -370,3 +370,21 @@ Payment, billing state, waivers, class booking, reservations, QR codes, key tags
 - Cloudflare account: `f02440d24727ce8e65f63b596c336c5e`
 - Brand: near-black `#09090a`, bone `#f4f1e9`, gold `#e7c24c`, Oswald display, Inter body
 - Timezone: `America/New_York`
+
+---
+
+## §15 V2 items approved
+
+Each item here has been approved by Johnny for a session. Nothing else from the V2 list is.
+
+### 15.1 Waiver prompt (approved 2026-09-07)
+
+A member checks in whether or not they have a waiver on file. Never block, never show an error. But when the waiver is missing:
+
+- **Kiosk:** the success screen adds one line, "One thing before class: sign the waiver", and the waiver QR code (`public/waiver-qr.png`, Johnny supplies). The screen holds longer so the QR can be scanned.
+- **Staff:** the roster row shows a "no waiver" tag; member lookup shows waiver status.
+- **Text or email:** the Worker never sends messages. Instead, on a check-in without a waiver it writes the custom field `WAIVER_FIELD` (default `checkin_last_at`, ISO timestamp) to that contact right away, using the one allowed write. A GHL workflow triggers on that field changing, checks the waiver tag is absent, and sends the message. Johnny owns the workflow and the message.
+
+Source of truth for "waiver on file" is the tag `WAIVER_TAG` (default `waiver-signed`) on the **student's** contact, read by the roster sync. If `WAIVER_TAG` is empty the feature is off and everyone counts as signed. Kids' waivers are signed by a parent; the GHL side must put the tag on the child's contact, not the parent's.
+
+Schema: `members.waiver INTEGER NOT NULL DEFAULT 1`. Migration in `src/db/migrations/002_waiver.sql`, applied by Johnny before the deploy that uses it.

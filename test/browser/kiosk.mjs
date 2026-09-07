@@ -59,7 +59,7 @@ const server = http.createServer((req, res) => {
       const duplicate = state.seen.has(key);
       state.seen.add(key);
       const count = [...state.seen].filter((k) => k.startsWith(rec.contactId)).length;
-      send(200, { ok: true, duplicate, className: rec.className, classStartLocal: rec.classStartLocal, classCount: count, classCountLabel: `Class #${count}` });
+      send(200, { ok: true, duplicate, className: rec.className, classStartLocal: rec.classStartLocal, classCount: count, classCountLabel: `Class #${count}`, waiverNeeded: rec.contactId === 'ffffffffffffffffffff' });
     });
     return;
   }
@@ -167,6 +167,26 @@ await step('no class: María (adult) gets "Check in anyway" and records open mat
   assert.equal(last.classStartLocal, '2026-09-05T00:00');
   await page.waitForSelector('#home.active', { timeout: 5000 });
 });
+await step('waiver missing: success screen adds the prompt and holds longer', async () => {
+  await page.fill('#name-input', 'jas');
+  await page.click('.tile:has-text("Jasmine Kim")');
+  await page.click('#checkin');
+  await page.waitForSelector('#success.active');
+  assert.equal(await page.locator('#waiver').isVisible(), true);
+  assert.match(await page.locator('#waiver p').textContent(), /sign the waiver/);
+  await page.screenshot({ path: join(OUT, 'ipad-waiver.png') });
+  await page.waitForTimeout(4000);
+  assert.equal(await page.locator('#success.active').count(), 1, 'still on the success screen after 4 s');
+  await page.waitForSelector('#home.active', { timeout: 12000 });
+  // A member with a waiver never sees it.
+  await page.fill('#name-input', 'jack');
+  await page.click('.tile:has-text("Jack Silva")');
+  await page.click('#checkin');
+  await page.waitForSelector('#success.active');
+  assert.equal(await page.locator('#waiver').isVisible(), false);
+  await page.waitForSelector('#home.active', { timeout: 5000 });
+});
+
 await step('back button returns home', async () => {
   await page.fill('#name-input', 'jam');
   await page.click('.tile:has-text("Jamie Baker")');

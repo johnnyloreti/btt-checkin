@@ -57,6 +57,14 @@ export function resetFieldCache() {
   fieldCache = { at: 0, map: null };
 }
 
+/** Map<key, id> of the location's custom fields, cached for an hour. */
+export async function getFieldIds(fetchFields, now = new Date()) {
+  if (!fieldCache.map || now.getTime() - fieldCache.at > 60 * 60 * 1000) {
+    fieldCache = { at: now.getTime(), map: await fetchFields() };
+  }
+  return fieldCache.map;
+}
+
 /**
  * Push rollups for every contact in pending_rollups.
  *
@@ -79,10 +87,7 @@ export async function runRollup(env, schedule, deps) {
 
   let fields;
   try {
-    if (!fieldCache.map || now.getTime() - fieldCache.at > 60 * 60 * 1000) {
-      fieldCache = { at: now.getTime(), map: await deps.fetchFields() };
-    }
-    fields = fieldCache.map;
+    fields = await getFieldIds(deps.fetchFields, now);
   } catch (e) {
     const detail = { error: `custom fields: ${e && e.message ? e.message : e}` };
     await logSync(db, ranAt, 'failed', detail);

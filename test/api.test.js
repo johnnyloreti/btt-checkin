@@ -88,6 +88,7 @@ test('POST /api/checkin records attendance and the duplicate guard holds', async
     classStartLocal: '2026-09-05T11:00',
     classCount: 1,
     classCountLabel: 'Class #1',
+    waiverNeeded: false,
   });
   const second = await post('/api/checkin', body);
   assert.equal((await second.json()).duplicate, true);

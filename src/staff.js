@@ -48,7 +48,7 @@ export async function classRoster(env, schedule, startLocal, className) {
   const filterName = typeof className === 'string' && className ? className : null;
   const { results } = await env.DB.prepare(
     `SELECT a.id, a.ghl_contact_id, a.class_name, a.checked_in_at, a.method, a.status_at_checkin,
-            m.first_name, m.last_name
+            m.first_name, m.last_name, m.waiver
        FROM attendance a
        LEFT JOIN members m ON m.ghl_contact_id = a.ghl_contact_id
       WHERE a.class_start_local = ? AND a.status = 'attended' AND (? IS NULL OR a.class_name = ?)
@@ -67,6 +67,7 @@ export async function classRoster(env, schedule, startLocal, className) {
       checkedInAt: r.checked_in_at,
       method: r.method,
       statusAtCheckin: r.status_at_checkin,
+      waiver: r.waiver === null || r.waiver === undefined ? null : Number(r.waiver) === 1,
     })),
   };
 }
@@ -82,7 +83,7 @@ export async function voidAttendance(env, attendanceId) {
 /** Member lookup: last 30 days, lifetime count, sync status. Read-only. */
 export async function memberHistory(env, schedule, contactId, now) {
   const member = await env.DB.prepare(
-    'SELECT ghl_contact_id, first_name, last_name, programs, active, synced_at FROM members WHERE ghl_contact_id = ?',
+    'SELECT ghl_contact_id, first_name, last_name, programs, active, synced_at, waiver FROM members WHERE ghl_contact_id = ?',
   )
     .bind(contactId)
     .first();
@@ -112,6 +113,7 @@ export async function memberHistory(env, schedule, contactId, now) {
     programs,
     programLabels: programs.filter((p) => schedule.programs[p]).map((p) => schedule.programs[p].label),
     active: Number(member.active) === 1,
+    waiver: Number(member.waiver ?? 1) === 1,
     syncedAt: member.synced_at,
     rollupPending: pending ? pending.queued_at : null,
     lifetime: Number(lifetime?.n ?? 0),

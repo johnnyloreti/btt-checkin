@@ -13,6 +13,11 @@ GHL_LOCATION_ID = "ARCSFhJ0JlkcuzfZtyEJ"
 TZ = "America/New_York"
 MEMBER_TAGS = "founding-member"
 MEMBER_TAG_PREFIXES = "foundations-"
+# Waiver prompt (§15.1). The tag a signed waiver leaves on the student's
+# contact, and the custom field written at check-in when it is missing so a
+# GHL workflow can send the reminder. Empty WAIVER_TAG turns the feature off.
+WAIVER_TAG = "waiver-signed"
+WAIVER_FIELD = "checkin_last_at"
 
 # One trigger every 30 minutes drives both jobs. The handler runs the
 # roster sync on every tick and the rollup on the tick that is 03:00 ET.
