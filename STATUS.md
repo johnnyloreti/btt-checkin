@@ -158,9 +158,12 @@ rather than by a Cloudflare custom domain. Pieces:
   headers = { X-Proxy-Key = "<same value as the PROXY_KEY secret>" }
 ```
 4. Worker: `wrangler secret put PROXY_KEY` with that value. With it, the
-   Worker rate-limits by the real visitor address Netlify forwards instead
-   of by Netlify's own address. Without it everything still works, but all
-   proxied visitors share one rate-limit bucket.
+   public routes rate-limit by the real visitor address Netlify forwards
+   instead of by Netlify's own address. Without it everything still works,
+   but all proxied visitors share one bucket. Staff login never trusts the
+   forwarded address, so a leaked key cannot help brute-force the PIN.
+   Keeping the key out of the public site repo (a Netlify env var read by
+   an edge function) is nicer but not required.
 
 The workers.dev address keeps working alongside. If DNS ever moves to
 Cloudflare, replace all of this with a Custom Domain on the Worker.

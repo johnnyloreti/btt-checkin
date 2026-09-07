@@ -53,3 +53,13 @@ test('behind the Netlify proxy the real visitor address is used, only with the s
   assert.equal(await allowRequest(env, other, PUBLIC, t0 + 60), true);
   resetFallback();
 });
+
+test('login limiting ignores the forwarded address even with a valid key', async () => {
+  resetFallback();
+  const env = { PROXY_KEY: 'shared-secret-value' };
+  const attempt = (ip) => new Request('https://x.test/api/staff/login', { method: 'POST', headers: { 'cf-connecting-ip': '3.3.3.3', 'x-nf-client-connection-ip': ip, 'x-proxy-key': 'shared-secret-value' } });
+  const t0 = 11_000_000;
+  for (let i = 0; i < LOGIN.limit; i += 1) assert.equal(await allowRequest(env, attempt(`10.0.0.${i}`), LOGIN, t0 + i), true);
+  assert.equal(await allowRequest(env, attempt('10.0.0.99'), LOGIN, t0 + 10), false, 'rotating forged addresses does not buy more attempts');
+  resetFallback();
+});
