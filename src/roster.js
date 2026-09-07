@@ -7,6 +7,9 @@
  */
 export const NOT_A_STUDENT_TAG = 'program:none';
 
+/** Every program tag starts with this. Used to spot typos. */
+export const PROGRAM_TAG_PREFIX = 'program:';
+
 /** Parse a comma-separated env var into trimmed lowercase entries. */
 export function parseList(str) {
   return String(str || '')
@@ -38,28 +41,40 @@ function normTags(contact) {
 
 /**
  * Classify one contact.
- * Returns { isMember, programs, flag } where flag is a short reason string
- * (or null) that the sync writes into sync_log detail by name.
+ * Returns { isMember, programs, flag, notStudent } where flag is a short
+ * reason string (or null) that the sync writes into sync_log detail by name.
+ *
+ * A contact is a member when it carries any of:
+ *  - a program tag from schedule.json (program:kids-6-9 etc.), since anyone
+ *    in a program trains (Johnny, 2026-09-07)
+ *  - an exact member tag (founding-member)
+ *  - a member prefix tag (foundations-*)
+ * program:none overrides everything: a paying non-student, never a tile.
  */
 export function classifyContact(contact, cfg) {
   const tags = normTags(contact);
   const hasExact = tags.some((t) => cfg.memberTags.includes(t));
   const hasPrefix = tags.some((t) => cfg.memberTagPrefixes.some((p) => t.startsWith(p)));
-  const isMember = hasExact || hasPrefix;
-  if (!isMember) return { isMember: false, programs: [], flag: null };
-  if (tags.includes(NOT_A_STUDENT_TAG)) return { isMember: false, notStudent: true, programs: [], flag: null };
 
   // Programs in schedule order so output is stable regardless of tag order.
   const programs = [];
   for (const [tag, key] of cfg.programTagMap) {
     if (tags.includes(tag) && !programs.includes(key)) programs.push(key);
   }
-  if (programs.length > 0) return { isMember: true, programs, flag: null };
+  const unknown = tags.filter((t) => t.startsWith(PROGRAM_TAG_PREFIX) && t !== NOT_A_STUDENT_TAG && !cfg.programTagMap.has(t));
+  const unknownFlag = unknown.length ? `unknown program tag ${unknown.join(', ')}` : null;
 
-  // No program tag. Foundations is the adult program, so that is silent.
-  if (hasPrefix) return { isMember: true, programs: ['adult'], flag: null };
+  const isMember = hasExact || hasPrefix || programs.length > 0;
+  if (!isMember) return { isMember: false, programs: [], flag: unknownFlag };
+  if (tags.includes(NOT_A_STUDENT_TAG)) return { isMember: false, notStudent: true, programs: [], flag: null };
+
+  if (programs.length > 0) return { isMember: true, programs, flag: unknownFlag };
+
+  // No usable program tag. Foundations is the adult program, so that is silent
+  // unless the tag looks like a typo.
+  if (hasPrefix) return { isMember: true, programs: ['adult'], flag: unknownFlag };
   // Founding members include kids; default to adult and say so.
-  return { isMember: true, programs: ['adult'], flag: 'no program tag, defaulted to adult' };
+  return { isMember: true, programs: ['adult'], flag: unknownFlag || 'no program tag, defaulted to adult' };
 }
 
 /**
@@ -94,7 +109,10 @@ export function buildRoster(contacts, cfg) {
     if (!c || !c.id) continue;
     const { isMember, programs, flag, notStudent } = classifyContact(c, cfg);
     if (notStudent) notStudents.push(c.id);
-    if (!isMember) continue;
+    if (!isMember) {
+      if (flag) flagged.push({ id: c.id, name: displayName(c), reason: flag });
+      continue;
+    }
     const first = tidyName(c.firstName);
     const last = tidyName(c.lastName);
     if (!first) {

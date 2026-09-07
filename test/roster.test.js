@@ -27,10 +27,32 @@ test('foundations- prefix makes a member, including future cohorts', () => {
   assert.equal(classifyContact(byId('c_future'), cfg).isMember, true);
 });
 
-test('program tag without a member tag is not a member', () => {
-  assert.equal(classifyContact(byId('c_lead'), cfg).isMember, false);
+test('a program tag alone makes a member', () => {
+  const lead = classifyContact(byId('c_lead'), cfg);
+  assert.equal(lead.isMember, true);
+  assert.deepEqual(lead.programs, ['adult']);
+  assert.equal(lead.flag, null);
+  const kid = classifyContact(byId('c_newkid'), cfg);
+  assert.equal(kid.isMember, true);
+  assert.deepEqual(kid.programs, ['kids-3-5']);
+});
+
+test('no tags at all is not a member', () => {
   assert.equal(classifyContact(byId('c_nobody'), cfg).isMember, false);
   assert.equal(classifyContact(byId('c_notags'), cfg).isMember, false);
+});
+
+test('a misspelled program tag is flagged, and hides nobody who is otherwise a member', () => {
+  const typo = classifyContact(byId('c_typo'), cfg);
+  assert.equal(typo.isMember, false);
+  assert.match(typo.flag, /unknown program tag program:kid-6-9/);
+  const founding = classifyContact({ id: 'f', tags: ['founding-member', 'program:kid-6-9'] }, cfg);
+  assert.equal(founding.isMember, true);
+  assert.deepEqual(founding.programs, ['adult']);
+  assert.match(founding.flag, /unknown program tag/);
+  const fine = classifyContact({ id: 'g', tags: ['program:kids-6-9', 'program:kid-6-9'] }, cfg);
+  assert.deepEqual(fine.programs, ['kids-6-9']);
+  assert.match(fine.flag, /unknown program tag/);
 });
 
 test('program tags parse case-insensitively and in schedule order', () => {
@@ -69,11 +91,11 @@ test('buildRoster keeps members only, flags by name, skips blank first names', (
   assert.deepEqual(notStudents, ['c_parent']);
   assert.deepEqual(
     members.map((m) => m.ghl_contact_id),
-    ['c_jack', 'c_emma', 'c_leo', 'c_maria', 'c_dan', 'c_future', 'c_sam'],
+    ['c_jack', 'c_emma', 'c_leo', 'c_maria', 'c_dan', 'c_future', 'c_sam', 'c_lead', 'c_newkid'],
   );
   assert.deepEqual(
     flagged.map((f) => `${f.name}: ${f.reason}`),
-    ['Sam Untagged: no program tag, defaulted to adult', 'Blank: no first name, skipped'],
+    ['Sam Untagged: no program tag, defaulted to adult', 'Blank: no first name, skipped', 'Ty Po: unknown program tag program:kid-6-9'],
   );
   assert.equal(members.find((m) => m.ghl_contact_id === 'c_maria').first_name, 'María');
 });
@@ -85,7 +107,7 @@ test('syncRoster writes members, logs ok with flagged names', async () => {
     now: NOW,
   });
   assert.equal(result.outcome, 'ok');
-  assert.equal(result.members, 7);
+  assert.equal(result.members, 9);
   assert.equal(result.contacts, CONTACTS.length);
   assert.equal(result.deactivated, 0);
   assert.equal(result.notStudents, 1);
@@ -93,10 +115,11 @@ test('syncRoster writes members, logs ok with flagged names', async () => {
   assert.deepEqual(result.flagged, [
     'Sam Untagged: no program tag, defaulted to adult',
     'Blank: no first name, skipped',
+    'Ty Po: unknown program tag program:kid-6-9',
   ]);
 
   const rows = DB.raw.prepare('SELECT * FROM members ORDER BY ghl_contact_id').all();
-  assert.equal(rows.length, 7);
+  assert.equal(rows.length, 9);
   const leo = rows.find((r) => r.ghl_contact_id === 'c_leo');
   assert.deepEqual(JSON.parse(leo.programs), ['kids-10-14', 'adult']);
   assert.equal(leo.active, 1);
@@ -145,11 +168,11 @@ test('re-sync updates names and programs in place', async () => {
     c.id === 'c_sam' ? { ...c, lastName: 'Tagged', tags: ['founding-member', 'program:kids-3-5'] } : c,
   );
   const result = await syncRoster(env, schedule, { fetchContacts: async () => ({ contacts: next, pages: 1 }), now: NOW });
-  assert.deepEqual(result.flagged, ['Blank: no first name, skipped']);
+  assert.deepEqual(result.flagged, ['Blank: no first name, skipped', 'Ty Po: unknown program tag program:kid-6-9']);
   const sam = DB.raw.prepare("SELECT * FROM members WHERE ghl_contact_id = 'c_sam'").get();
   assert.equal(sam.last_name, 'Tagged');
   assert.deepEqual(JSON.parse(sam.programs), ['kids-3-5']);
-  assert.equal(DB.raw.prepare('SELECT COUNT(*) AS n FROM members').get().n, 7);
+  assert.equal(DB.raw.prepare('SELECT COUNT(*) AS n FROM members').get().n, 9);
 });
 
 test('zero members from GHL logs degraded and leaves the table untouched', async () => {
@@ -158,7 +181,7 @@ test('zero members from GHL logs degraded and leaves the table untouched', async
   await syncRoster(env, schedule, { fetchContacts: async () => ({ contacts: CONTACTS, pages: 1 }), now: NOW });
   const before = DB.raw.prepare('SELECT * FROM members ORDER BY ghl_contact_id').all();
 
-  for (const contacts of [[], [byId('c_lead'), byId('c_nobody')]]) {
+  for (const contacts of [[], [byId('c_typo'), byId('c_nobody')]]) {
     const result = await syncRoster(env, schedule, { fetchContacts: async () => ({ contacts, pages: 1 }), now: new Date() });
     assert.equal(result.outcome, 'degraded');
     assert.match(result.reason, /untouched/);
@@ -182,7 +205,7 @@ test('a GHL failure logs failed and leaves the table untouched', async () => {
   });
   assert.equal(result.outcome, 'failed');
   assert.match(result.error, /401/);
-  assert.equal(DB.raw.prepare('SELECT COUNT(*) AS n FROM members WHERE active = 1').get().n, 7);
+  assert.equal(DB.raw.prepare('SELECT COUNT(*) AS n FROM members WHERE active = 1').get().n, 9);
   const last = DB.raw.prepare('SELECT outcome, detail FROM sync_log ORDER BY id DESC LIMIT 1').get();
   assert.equal(last.outcome, 'failed');
   assert.match(last.detail, /401/);
@@ -214,14 +237,14 @@ test('tagging a synced parent program:none removes their row; attendance stays',
   // First sync: the parent is a plain founding member and lands in Adult, flagged.
   const before = CONTACTS.map((c) => (c.id === 'c_parent' ? { ...c, tags: ['founding-member'] } : c));
   let r = await syncRoster(env, schedule, { fetchContacts: async () => ({ contacts: before, pages: 1 }), now: NOW });
-  assert.equal(r.members, 8);
+  assert.equal(r.members, 10);
   assert.ok(r.flagged.some((f) => f.startsWith('Paula Payer')));
   DB.raw
     .prepare("INSERT INTO attendance (ghl_contact_id, class_name, class_start_local, checked_in_at, method) VALUES ('c_parent', 'open mat / unscheduled', '2026-09-05T00:00', '2026-09-05T14:00:00Z', 'kiosk')")
     .run();
   // Second sync: tagged program:none.
   r = await syncRoster(env, schedule, { fetchContacts: async () => ({ contacts: CONTACTS, pages: 1 }), now: new Date(NOW.getTime() + 60_000) });
-  assert.equal(r.members, 7);
+  assert.equal(r.members, 9);
   assert.equal(r.removed, 1);
   assert.equal(r.notStudents, 1);
   assert.ok(!r.flagged.some((f) => f.startsWith('Paula')));

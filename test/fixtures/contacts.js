@@ -14,4 +14,6 @@ export const CONTACTS = [
   { id: 'c_notags', firstName: 'Null', lastName: 'Tags' },
   { id: 'c_noname', firstName: '', lastName: 'Blank', tags: ['founding-member'] },
   { id: 'c_parent', firstName: 'Paula', lastName: 'Payer', tags: ['founding-member', 'program:none', 'payer'] },
+  { id: 'c_newkid', firstName: 'Nora', lastName: 'Newkid', tags: ['program:kids-3-5'] },
+  { id: 'c_typo', firstName: 'Ty', lastName: 'Po', tags: ['program:kid-6-9'] },
 ];
