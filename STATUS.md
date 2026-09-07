@@ -27,7 +27,7 @@
 5. **Inactive members** appear on the kiosk and can check in. The record carries `status_at_checkin = inactive`. Staff see an inactive tag on the roster row.
 6. **Late queued check-ins** are accepted for up to three days back. Anything older is refused.
 7. **Rollup week** is Monday to Sunday in ET. At Monday 03:00 the week count resets to zero for everyone.
-8. **Cron for 03:00 ET** is registered at both 07:00 and 08:00 UTC. The handler runs it only when the ET hour is 3. This holds across DST without a redeploy.
+8. **One cron trigger.** A single every-30-minutes schedule runs the roster sync on every tick and the rollup on the tick that is 03:00 ET, whatever DST is doing. One trigger because Workers Free allows 5 per account and btt-ops uses some of them.
 9. **Compatibility date** is 2026-08-01. Wrangler is pinned to the 4.129 line.
 
 ## Things the brief got wrong or left open
