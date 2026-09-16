@@ -7,7 +7,7 @@ import { runRollup } from './rollup.js';
 import { notifyWaiverCheckin, waiverEnabled } from './waiver.js';
 import { isStaff, pinMatches, issueToken, cookieHeader, SESSION_MS } from './staff-auth.js';
 import { buildIdMap, opaqueId, requireSalt } from './ids.js';
-import { matchClasses } from './classes.js';
+import { matchClasses, windowFromEnv } from './classes.js';
 import { allowRequest, PUBLIC, LOGIN } from './ratelimit.js';
 import { recordCheckin } from './checkin.js';
 import { today, classRoster, voidAttendance, memberHistory } from './staff.js';
@@ -226,7 +226,7 @@ export function createApp(schedule, deps = defaultDeps()) {
           const at = url.searchParams.get('at');
           const when = at ? new Date(at) : now();
           if (Number.isNaN(when.getTime())) return json({ error: 'bad at' }, 400);
-          return json(matchClasses(schedule, when, env.TZ || tz));
+          return json(matchClasses(schedule, when, env.TZ || tz, windowFromEnv(env)));
         }
 
         if (method === 'POST' && path === '/api/checkin') {

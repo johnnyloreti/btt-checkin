@@ -33,7 +33,7 @@ const ROSTER = [
 // Sat 11:00 ET: Kids 6-9 (11:00) and Kids 10-14 (11:45) are in window; adults are not.
 const CURRENT = {
   now: '2026-09-05T15:00:00.000Z', nowLocal: '2026-09-05T11:00', date: '2026-09-05', weekday: 'Sat',
-  window: { earlyMin: 45, lateMin: 15 },
+  window: { earlyMin: 180, lateMin: 180 },
   matches: [
     { name: 'Kids 6-9', program: 'kids-6-9', programLabel: 'Kids 6-9', start: '11:00', minutes: 45, startLocal: '2026-09-05T11:00', startsInMin: 0 },
     { name: 'Kids 10-14', program: 'kids-10-14', programLabel: 'Kids 10-14', start: '11:45', minutes: 60, startLocal: '2026-09-05T11:45', startsInMin: 45 },

@@ -16,6 +16,11 @@ MEMBER_TAG_PREFIXES = "foundations-"
 # Waiver prompt (§15.1). The tag a signed waiver leaves on the student's
 # contact, and the custom field written at check-in when it is missing so a
 # GHL workflow can send the reminder. Empty WAIVER_TAG turns the feature off.
+# Check-in window in minutes: how long before a class starts, and how long
+# after it starts, a member may still check in to it. 180/180 set 2026-09-16.
+CHECKIN_EARLY_MIN = "180"
+CHECKIN_LATE_MIN = "180"
+
 WAIVER_TAG = "waiver-signed"
 WAIVER_FIELD = "checkin_last_at"
 

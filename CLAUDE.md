@@ -86,7 +86,7 @@ Kids 6-9  4:30 PM
 [ CHECK IN ]
 ```
 
-- The class is **pre-selected** from `schedule.json`: the class for this member's program whose start time is within the window: from **2 hours before** start to **20 minutes after** start, ET. (Changed from 45 / 15 by Johnny, 2026-09-06.) If exactly one matches, show it. Kids classes stack back to back on weekdays, so the program tag is what disambiguates; the window alone never decides. If two match (a member with two program tags, e.g. a 14-year-old approved for adult), show both as large buttons. If none match, show "No class right now" and a single button "Check in anyway" that records attendance with `class_name = "open mat / unscheduled"`.
+- The class is **pre-selected** from `schedule.json`: the class for this member's program whose start time is within the window: from **3 hours before** start to **3 hours after** start, ET. (45 / 15 at first; 120 / 20 by Johnny on 2026-09-06; 180 / 180 by Johnny on 2026-09-16, "wide and easy".) Both numbers are `CHECKIN_EARLY_MIN` and `CHECKIN_LATE_MIN` in `wrangler.toml`, so changing them is a config edit and a deploy, not a code change. At this width most of a day's classes are in the window at once; the program tag is what picks one, and no program has two classes on the same day, so a single-program member is never offered a choice within their own program. If exactly one matches, show it. Kids classes stack back to back on weekdays, so the program tag is what disambiguates; the window alone never decides. If two match (a member with two program tags, e.g. a 14-year-old approved for adult), show both as large buttons. If none match, show "No class right now" and a single button "Check in anyway" that records attendance with `class_name = "open mat / unscheduled"`.
 - Tap CHECK IN. Success screen for 3 seconds, then back to home:
 
 ```
@@ -278,6 +278,7 @@ Vars in `wrangler.toml`:
 - `TZ = "America/New_York"`
 - `MEMBER_TAGS = "founding-member"`
 - `MEMBER_TAG_PREFIXES = "foundations-"`
+- `CHECKIN_EARLY_MIN = "180"` and `CHECKIN_LATE_MIN = "180"` (§2 window, minutes)
 
 `.dev.vars.example` committed; `.dev.vars` gitignored. Parser must handle CRLF and BOM.
 
