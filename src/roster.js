@@ -31,6 +31,8 @@ export function rosterConfig(env, schedule) {
     memberTags: parseList(env.MEMBER_TAGS),
     memberTagPrefixes: parseList(env.MEMBER_TAG_PREFIXES),
     programTagMap,
+    // §15.1: empty means the waiver feature is off and everyone counts as signed.
+    waiverTag: String(env.WAIVER_TAG || '').trim().toLowerCase(),
   };
 }
 
@@ -68,13 +70,15 @@ export function classifyContact(contact, cfg) {
   if (!isMember) return { isMember: false, programs: [], flag: unknownFlag };
   if (tags.includes(NOT_A_STUDENT_TAG)) return { isMember: false, notStudent: true, programs: [], flag: null };
 
-  if (programs.length > 0) return { isMember: true, programs, flag: unknownFlag };
+  const waiver = !cfg.waiverTag || tags.includes(cfg.waiverTag);
+
+  if (programs.length > 0) return { isMember: true, programs, waiver, flag: unknownFlag };
 
   // No usable program tag. Foundations is the adult program, so that is silent
   // unless the tag looks like a typo.
-  if (hasPrefix) return { isMember: true, programs: ['adult'], flag: unknownFlag };
+  if (hasPrefix) return { isMember: true, programs: ['adult'], waiver, flag: unknownFlag };
   // Founding members include kids; default to adult and say so.
-  return { isMember: true, programs: ['adult'], flag: unknownFlag || 'no program tag, defaulted to adult' };
+  return { isMember: true, programs: ['adult'], waiver, flag: unknownFlag || 'no program tag, defaulted to adult' };
 }
 
 /**
@@ -107,7 +111,7 @@ export function buildRoster(contacts, cfg) {
   const notStudents = [];
   for (const c of contacts) {
     if (!c || !c.id) continue;
-    const { isMember, programs, flag, notStudent } = classifyContact(c, cfg);
+    const { isMember, programs, flag, notStudent, waiver } = classifyContact(c, cfg);
     if (notStudent) notStudents.push(c.id);
     if (!isMember) {
       if (flag) flagged.push({ id: c.id, name: displayName(c), reason: flag });
@@ -120,7 +124,7 @@ export function buildRoster(contacts, cfg) {
       continue;
     }
     if (flag) flagged.push({ id: c.id, name: displayName(c), reason: flag });
-    members.push({ ghl_contact_id: c.id, first_name: first, last_name: last, programs });
+    members.push({ ghl_contact_id: c.id, first_name: first, last_name: last, programs, waiver: waiver ? 1 : 0 });
   }
   return { members, flagged, notStudents };
 }
@@ -173,17 +177,18 @@ export async function syncRoster(env, schedule, deps) {
 
   try {
     const upsert = db.prepare(
-      `INSERT INTO members (ghl_contact_id, first_name, last_name, programs, active, synced_at)
-       VALUES (?, ?, ?, ?, 1, ?)
+      `INSERT INTO members (ghl_contact_id, first_name, last_name, programs, active, synced_at, waiver)
+       VALUES (?, ?, ?, ?, 1, ?, ?)
        ON CONFLICT(ghl_contact_id) DO UPDATE SET
          first_name = excluded.first_name,
          last_name  = excluded.last_name,
          programs   = excluded.programs,
          active     = 1,
-         synced_at  = excluded.synced_at`,
+         synced_at  = excluded.synced_at,
+         waiver     = excluded.waiver`,
     );
     const stmts = members.map((m) =>
-      upsert.bind(m.ghl_contact_id, m.first_name, m.last_name, JSON.stringify(m.programs), ranAt),
+      upsert.bind(m.ghl_contact_id, m.first_name, m.last_name, JSON.stringify(m.programs), ranAt, m.waiver),
     );
     // Anyone not touched this run has lost their member tags.
     stmts.push(db.prepare('UPDATE members SET active = 0 WHERE synced_at <> ? AND active = 1').bind(ranAt));
@@ -202,6 +207,7 @@ export async function syncRoster(env, schedule, deps) {
       deactivated,
       notStudents: notStudents.length,
       removed,
+      waiverMissing: cfg.waiverTag ? members.filter((m) => !m.waiver).length : null,
       flagged: flagged.map((f) => `${f.name}: ${f.reason}`),
     };
     await logSync(db, 'roster', ranAt, 'ok', detail);

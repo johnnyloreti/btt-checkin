@@ -86,7 +86,7 @@ Kids 6-9  4:30 PM
 [ CHECK IN ]
 ```
 
-- The class is **pre-selected** from `schedule.json`: the class for this member's program whose start time is within the window: from **2 hours before** start to **20 minutes after** start, ET. (Changed from 45 / 15 by Johnny, 2026-09-06.) If exactly one matches, show it. Kids classes stack back to back on weekdays, so the program tag is what disambiguates; the window alone never decides. If two match (a member with two program tags, e.g. a 14-year-old approved for adult), show both as large buttons. If none match, show "No class right now" and a single button "Check in anyway" that records attendance with `class_name = "open mat / unscheduled"`.
+- The class is **pre-selected** from `schedule.json`: the class for this member's program whose start time is within the window: from **3 hours before** start to **3 hours after** start, ET. (45 / 15 at first; 120 / 20 by Johnny on 2026-09-06; 180 / 180 by Johnny on 2026-09-16, "wide and easy".) Both numbers are `CHECKIN_EARLY_MIN` and `CHECKIN_LATE_MIN` in `wrangler.toml`, so changing them is a config edit and a deploy, not a code change. At this width most of a day's classes are in the window at once; the program tag is what picks one, and no program has two classes on the same day, so a single-program member is never offered a choice within their own program. If exactly one matches, show it. Kids classes stack back to back on weekdays, so the program tag is what disambiguates; the window alone never decides. If two match (a member with two program tags, e.g. a 14-year-old approved for adult), show both as large buttons. If none match, show "No class right now" and a single button "Check in anyway" that records attendance with `class_name = "open mat / unscheduled"`.
 - Tap CHECK IN. Success screen for 3 seconds, then back to home:
 
 ```
@@ -278,6 +278,7 @@ Vars in `wrangler.toml`:
 - `TZ = "America/New_York"`
 - `MEMBER_TAGS = "founding-member"`
 - `MEMBER_TAG_PREFIXES = "foundations-"`
+- `CHECKIN_EARLY_MIN = "180"` and `CHECKIN_LATE_MIN = "180"` (§2 window, minutes)
 
 `.dev.vars.example` committed; `.dev.vars` gitignored. Parser must handle CRLF and BOM.
 
@@ -360,7 +361,7 @@ First real use: check yourself in from the iPad, then open `/staff` and confirm 
 
 ## §13 Non-goals for V1
 
-Payment, billing state, waivers, class booking, reservations, QR codes, key tags, wallet passes, belt tracking, promotions, family accounts, member portal, push notifications, native apps, GHL Custom Objects, reading GHL calendars, any write to GHL other than the five rollup fields, anything that touches `btt-ops`.
+Payment, billing state, waivers (the waiver prompt in §15 is the one exception, approved for V2 on 2026-09-07), class booking, reservations, QR codes, key tags, wallet passes, belt tracking, promotions, family accounts, member portal, push notifications, native apps, GHL Custom Objects, reading GHL calendars, any write to GHL other than the five rollup fields, anything that touches `btt-ops`.
 
 ---
 
@@ -370,3 +371,21 @@ Payment, billing state, waivers, class booking, reservations, QR codes, key tags
 - Cloudflare account: `f02440d24727ce8e65f63b596c336c5e`
 - Brand: near-black `#09090a`, bone `#f4f1e9`, gold `#e7c24c`, Oswald display, Inter body
 - Timezone: `America/New_York`
+
+---
+
+## §15 V2 items approved
+
+Each item here has been approved by Johnny for a session. Nothing else from the V2 list is.
+
+### 15.1 Waiver prompt (approved 2026-09-07)
+
+A member checks in whether or not they have a waiver on file. Never block, never show an error. But when the waiver is missing:
+
+- **Kiosk:** the success screen adds one line, "One thing before class: sign the waiver", and the waiver QR code (`public/waiver-qr.png`, Johnny supplies). The screen holds longer so the QR can be scanned.
+- **Staff:** the roster row shows a "no waiver" tag; member lookup shows waiver status.
+- **Text or email:** the Worker never sends messages. Instead, on a check-in without a waiver it writes the custom field `WAIVER_FIELD` (default `checkin_last_at`, ISO timestamp) to that contact right away, using the one allowed write. A GHL workflow triggers on that field changing, checks the waiver tag is absent, and sends the message. Johnny owns the workflow and the message.
+
+Source of truth for "waiver on file" is the tag `WAIVER_TAG` (default `waiver-signed`) on the **student's** contact, read by the roster sync. If `WAIVER_TAG` is empty the feature is off and everyone counts as signed. Kids' waivers are signed by a parent; the GHL side must put the tag on the child's contact, not the parent's.
+
+Schema: `members.waiver INTEGER NOT NULL DEFAULT 1`. Migration in `src/db/migrations/002_waiver.sql`, applied by Johnny before the deploy that uses it.

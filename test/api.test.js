@@ -62,16 +62,26 @@ test('GET /api/roster fails closed without ID_SALT', async () => {
   }
 });
 
+test('the window is configurable per deploy', async () => {
+  const { env, app } = await setup();
+  env.CHECKIN_EARLY_MIN = '45';
+  env.CHECKIN_LATE_MIN = '15';
+  const res = await app.fetch(new Request('https://x.test/api/current-class', { headers: { 'cf-connecting-ip': '10.9.9.9' } }), env);
+  const body = await res.json();
+  assert.deepEqual(body.window, { earlyMin: 45, lateMin: 15 });
+  assert.deepEqual(body.matches.map((m) => m.name), ['Kids 6-9'], 'Sat 10:55 with the old narrow window');
+});
+
 test('GET /api/current-class computes matches server-side, with ?at for testing', async () => {
   const { get } = await setup();
   const live = await (await get('/api/current-class')).json();
   assert.equal(live.nowLocal, '2026-09-05T10:55');
-  assert.deepEqual(live.matches.map((m) => m.name), ['Kids 6-9', 'Kids 10-14']); // 3-5 closed at 10:50, Adult opens at 11:00
-  assert.equal(live.matches[0].startLocal, '2026-09-05T11:00');
-  assert.deepEqual(live.window, { earlyMin: 120, lateMin: 20 });
+  assert.deepEqual(live.matches.map((m) => m.name), ['Kids 3-5', 'Kids 6-9', 'Kids 10-14', 'Adult BJJ']);
+  assert.equal(live.matches[1].startLocal, '2026-09-05T11:00');
+  assert.deepEqual(live.window, { earlyMin: 180, lateMin: 180 });
 
   const at = await (await get('/api/current-class?at=2026-09-08T22:00:00Z')).json(); // Tue 18:00 ET
-  assert.deepEqual(at.matches.map((m) => m.name), ['Adult BJJ']);
+  assert.deepEqual(at.matches.map((m) => m.name), ['Kids 3-5', 'Kids 6-9', 'Kids 10-14', 'Adult BJJ']);
   assert.equal((await get('/api/current-class?at=nope')).status, 400);
 });
 
@@ -88,6 +98,7 @@ test('POST /api/checkin records attendance and the duplicate guard holds', async
     classStartLocal: '2026-09-05T11:00',
     classCount: 1,
     classCountLabel: 'Class #1',
+    waiverNeeded: false,
   });
   const second = await post('/api/checkin', body);
   assert.equal((await second.json()).duplicate, true);
@@ -154,9 +165,12 @@ test('checkin on a Wednesday uses the No-Gi name for adults', async () => {
   const wed = new Date('2026-09-09T22:00:00Z'); // Wed 18:00 ET
   const { get, post } = await setup(wed);
   const cc = await (await get('/api/current-class')).json();
-  assert.deepEqual(cc.matches.map((m) => m.name), ['Adult No-Gi']);
+  // The wide window offers the whole evening; the member's program picks one.
+  assert.deepEqual(cc.matches.map((m) => m.name), ['Kids 6-9', 'Kids 10-14', 'Adult No-Gi']);
+  const mine = cc.matches.filter((m) => m.program === 'adult'); // c_dan is program:adult
+  assert.deepEqual(mine.map((m) => m.name), ['Adult No-Gi'], 'never Adult BJJ on a Wednesday');
   const id = await opaqueId('c_dan', SALT);
-  const res = await post('/api/checkin', { contactId: id, className: cc.matches[0].name, classStartLocal: cc.matches[0].startLocal });
+  const res = await post('/api/checkin', { contactId: id, className: mine[0].name, classStartLocal: mine[0].startLocal });
   assert.equal(res.status, 200);
   assert.equal((await res.json()).className, 'Adult No-Gi');
 });

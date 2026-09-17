@@ -4,9 +4,32 @@
 import { localParts, pad } from './time.js';
 import { parseTime } from './schedule.js';
 
-/** Check-in window: from EARLY_MIN before start to LATE_MIN after. Johnny set 2 h / 20 min on 2026-09-06. */
-export const EARLY_MIN = 120;
-export const LATE_MIN = 20;
+/**
+ * Check-in window: from EARLY_MIN before start to LATE_MIN after.
+ * Johnny set 3 h either way on 2026-09-16, "wide and easy". Both are
+ * overridable per deploy with CHECKIN_EARLY_MIN / CHECKIN_LATE_MIN in
+ * wrangler.toml, so tuning them needs no code change.
+ *
+ * Widening is safe: no program in schedule.json has two classes on the same
+ * day, so a single-program member can never be shown two of their own
+ * classes at once however wide the window gets.
+ */
+export const EARLY_MIN = 180;
+export const LATE_MIN = 180;
+
+/** The configured window, falling back to the defaults above. */
+export function windowFromEnv(env = {}) {
+  const minutes = (value, fallback) => {
+    const raw = String(value ?? '').trim();
+    if (raw === '') return fallback; // unset, or blank in wrangler.toml
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 0 ? n : fallback;
+  };
+  return {
+    earlyMin: minutes(env.CHECKIN_EARLY_MIN, EARLY_MIN),
+    lateMin: minutes(env.CHECKIN_LATE_MIN, LATE_MIN),
+  };
+}
 
 export const UNSCHEDULED_CLASS = 'open mat / unscheduled';
 

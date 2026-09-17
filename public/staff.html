@@ -249,6 +249,7 @@
       row.append(el('span', 'check', '✓'), el('span', 'name', displayName(r)), el('span', 'time', fmtClock(r.checkedInAt)));
       if (r.method === 'staff') row.appendChild(el('span', 'tag', 'staff'));
       if (r.statusAtCheckin === 'inactive') row.appendChild(el('span', 'tag warn', 'inactive'));
+      if (r.waiver === false) row.appendChild(el('span', 'tag warn', 'no waiver'));
       const rm = el('button', 'remove', 'Remove');
       rm.type = 'button';
       rm.addEventListener('click', async () => {
@@ -315,6 +316,7 @@
     fact('Program', d.programLabels.join(' / ') || 'none');
     fact('Lifetime', `Class #${d.lifetime}`, true);
     fact('Status', d.active ? 'Active' : 'Inactive');
+    fact('Waiver', d.waiver ? 'On file' : 'Missing', !d.waiver);
     fact('Roster synced', d.syncedAt ? `${fmtDate(d.syncedAt.slice(0, 10))} ${fmtClock(d.syncedAt)}` : 'never');
     fact('GHL rollup', d.rollupPending ? 'Pending tonight' : 'Up to date');
     const list = $('member-history');
