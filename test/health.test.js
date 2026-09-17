@@ -3,11 +3,19 @@ import assert from 'node:assert/strict';
 import { createApp, health } from '../src/app.js';
 import { loadSchedule } from '../src/schedule.js';
 import { fakeD1, readRepoFile } from './helpers.js';
+import { resetSchemaCaps } from '../src/schema-caps.js';
 
 const schedule = loadSchedule(readRepoFile('schedule.json'));
 
+// The waiver column check is cached per isolate; each fake database re-asks.
+const migrated = { 'pragma_table_info': [{ name: 'waiver' }] };
+const fake = (opts = {}) => {
+  resetSchemaCaps();
+  return fakeD1({ ...opts, rows: { ...migrated, ...(opts.rows || {}) } });
+};
+
 test('/health reports counts and last roster sync', async () => {
-  const DB = fakeD1({
+  const DB = fake({
     rows: {
       'FROM members': { n: 42 },
       "job = 'roster'": { ran_at: '2026-09-06T14:00:00.000Z', outcome: 'ok' },
@@ -28,12 +36,13 @@ test('/health reports counts and last roster sync', async () => {
     lastRollup: '2026-09-06T07:00:00.000Z',
     lastRollupOutcome: 'degraded',
     pendingRollups: 3,
+    schemaCurrent: true,
     schedulePresent: true,
   });
 });
 
 test('/health with an empty database is ok with zero members and no sync', async () => {
-  const DB = fakeD1({ rows: { 'FROM members': { n: 0 } } });
+  const DB = fake({ rows: { 'FROM members': { n: 0 } } });
   const body = await health({ DB }, schedule);
   assert.equal(body.ok, true);
   assert.equal(body.memberCount, 0);
@@ -41,7 +50,7 @@ test('/health with an empty database is ok with zero members and no sync', async
 });
 
 test('/health is 503 with ok=false when D1 fails', async () => {
-  const DB = fakeD1({ fail: 'no such table: members' });
+  const DB = fake({ fail: 'no such table: members' });
   const app = createApp(schedule);
   const res = await app.fetch(new Request('https://x.test/health'), { DB });
   assert.equal(res.status, 503);
@@ -52,7 +61,7 @@ test('/health is 503 with ok=false when D1 fails', async () => {
 });
 
 test('/health is not ok without a schedule', async () => {
-  const DB = fakeD1({ rows: { 'FROM members': { n: 1 } } });
+  const DB = fake({ rows: { 'FROM members': { n: 1 } } });
   const body = await health({ DB }, { classes: [] });
   assert.equal(body.ok, false);
   assert.equal(body.schedulePresent, false);
@@ -60,7 +69,7 @@ test('/health is not ok without a schedule', async () => {
 
 test('unknown routes are 404 JSON', async () => {
   const app = createApp(schedule);
-  const res = await app.fetch(new Request('https://x.test/nope'), { DB: fakeD1() });
+  const res = await app.fetch(new Request('https://x.test/nope'), { DB: fake() });
   assert.equal(res.status, 404);
   assert.deepEqual(await res.json(), { error: 'not found' });
 });

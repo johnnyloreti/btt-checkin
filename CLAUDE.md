@@ -388,4 +388,11 @@ A member checks in whether or not they have a waiver on file. Never block, never
 
 Source of truth for "waiver on file" is the tag `WAIVER_TAG` (default `waiver-signed`) on the **student's** contact, read by the roster sync. If `WAIVER_TAG` is empty the feature is off and everyone counts as signed. Kids' waivers are signed by a parent; the GHL side must put the tag on the child's contact, not the parent's.
 
-Schema: `members.waiver INTEGER NOT NULL DEFAULT 1`. Migration in `src/db/migrations/002_waiver.sql`, applied by Johnny before the deploy that uses it.
+Schema: `members.waiver INTEGER NOT NULL DEFAULT 1`. Migration in `src/db/migrations/002_waiver.sql`.
+
+**Migration rule, learned the hard way on 2026-09-17.** The waiver code was deployed before that migration ran. Every check-in read `members.waiver`, threw "no such column", and returned 500. Because the kiosk never shows a student an error (§2), it queued each one and showed the checkmark anyway: attendance stopped recording and nothing said so. `/health` did not touch the column, so it stayed green.
+
+So, for any migration from here on:
+- **No optional column may be named unconditionally in a query on the check-in path.** Ask `hasWaiverColumn` in `src/schema-caps.js` first and build the SQL accordingly. A pending migration must degrade the feature, never break attendance.
+- **`/health` reports `schemaCurrent`** and goes `ok: false` with the migration filename when a column is missing. A half-applied deploy is visible.
+- Apply the migration before the deploy that needs it, but the deploy must survive the other order.

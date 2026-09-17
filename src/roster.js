@@ -1,6 +1,8 @@
 // roster.js — turn GHL contacts into the members table.
 // Rules from §6. Pure functions first, then the sync that touches D1.
 
+import { hasWaiverColumn } from './schema-caps.js';
+
 /**
  * A contact with this tag is a paying family member who does not train:
  * founding-member for billing, but never a kiosk tile. Added 2026-09-07.
@@ -176,19 +178,32 @@ export async function syncRoster(env, schedule, deps) {
   }
 
   try {
+    // waiver is optional until the migration runs (see schema-caps.js).
+    const withWaiver = await hasWaiverColumn(env);
     const upsert = db.prepare(
-      `INSERT INTO members (ghl_contact_id, first_name, last_name, programs, active, synced_at, waiver)
-       VALUES (?, ?, ?, ?, 1, ?, ?)
-       ON CONFLICT(ghl_contact_id) DO UPDATE SET
-         first_name = excluded.first_name,
-         last_name  = excluded.last_name,
-         programs   = excluded.programs,
-         active     = 1,
-         synced_at  = excluded.synced_at,
-         waiver     = excluded.waiver`,
+      withWaiver
+        ? `INSERT INTO members (ghl_contact_id, first_name, last_name, programs, active, synced_at, waiver)
+           VALUES (?, ?, ?, ?, 1, ?, ?)
+           ON CONFLICT(ghl_contact_id) DO UPDATE SET
+             first_name = excluded.first_name,
+             last_name  = excluded.last_name,
+             programs   = excluded.programs,
+             active     = 1,
+             synced_at  = excluded.synced_at,
+             waiver     = excluded.waiver`
+        : `INSERT INTO members (ghl_contact_id, first_name, last_name, programs, active, synced_at)
+           VALUES (?, ?, ?, ?, 1, ?)
+           ON CONFLICT(ghl_contact_id) DO UPDATE SET
+             first_name = excluded.first_name,
+             last_name  = excluded.last_name,
+             programs   = excluded.programs,
+             active     = 1,
+             synced_at  = excluded.synced_at`,
     );
     const stmts = members.map((m) =>
-      upsert.bind(m.ghl_contact_id, m.first_name, m.last_name, JSON.stringify(m.programs), ranAt, m.waiver),
+      withWaiver
+        ? upsert.bind(m.ghl_contact_id, m.first_name, m.last_name, JSON.stringify(m.programs), ranAt, m.waiver)
+        : upsert.bind(m.ghl_contact_id, m.first_name, m.last_name, JSON.stringify(m.programs), ranAt),
     );
     // Anyone not touched this run has lost their member tags.
     stmts.push(db.prepare('UPDATE members SET active = 0 WHERE synced_at <> ? AND active = 1').bind(ranAt));

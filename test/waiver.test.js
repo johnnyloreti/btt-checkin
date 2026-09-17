@@ -134,5 +134,8 @@ test('kiosk page carries the waiver line and the QR slot', () => {
   const html = readRepoFile('public/index.html');
   assert.match(html, /One thing before class: sign the waiver/);
   assert.match(html, /waiver-qr\.png/);
-  assert.doesNotMatch(html, /waiver[^<]*!/);
+  const block = /<div id="waiver"[\s\S]*?<\/div>/.exec(html);
+  assert.ok(block, 'waiver block present');
+  assert.doesNotMatch(block[0], /!/, 'member-facing copy takes no exclamation points (§0.9)');
+  assert.doesNotMatch(block[0], /—/);
 });

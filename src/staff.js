@@ -3,6 +3,7 @@
 
 import { classesOn, UNSCHEDULED_CLASS, START_LOCAL_RE, shiftDate } from './classes.js';
 import { localParts } from './time.js';
+import { hasWaiverColumn } from './schema-caps.js';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -46,9 +47,10 @@ export async function classRoster(env, schedule, startLocal, className) {
     throw Object.assign(new Error('start must be YYYY-MM-DDTHH:MM'), { status: 400 });
   }
   const filterName = typeof className === 'string' && className ? className : null;
+  const waiverCol = (await hasWaiverColumn(env)) ? 'm.waiver' : 'NULL AS waiver';
   const { results } = await env.DB.prepare(
     `SELECT a.id, a.ghl_contact_id, a.class_name, a.checked_in_at, a.method, a.status_at_checkin,
-            m.first_name, m.last_name, m.waiver
+            m.first_name, m.last_name, ${waiverCol}
        FROM attendance a
        LEFT JOIN members m ON m.ghl_contact_id = a.ghl_contact_id
       WHERE a.class_start_local = ? AND a.status = 'attended' AND (? IS NULL OR a.class_name = ?)
@@ -82,8 +84,9 @@ export async function voidAttendance(env, attendanceId) {
 
 /** Member lookup: last 30 days, lifetime count, sync status. Read-only. */
 export async function memberHistory(env, schedule, contactId, now) {
+  const cols = (await hasWaiverColumn(env)) ? 'programs, active, synced_at, waiver' : 'programs, active, synced_at';
   const member = await env.DB.prepare(
-    'SELECT ghl_contact_id, first_name, last_name, programs, active, synced_at, waiver FROM members WHERE ghl_contact_id = ?',
+    `SELECT ghl_contact_id, first_name, last_name, ${cols} FROM members WHERE ghl_contact_id = ?`,
   )
     .bind(contactId)
     .first();

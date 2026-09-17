@@ -62,6 +62,17 @@ wrangler d1 execute btt-checkin --remote --file=src/db/migrations/002_waiver.sql
 
 What happens: a member without the tag still checks in. The success screen adds "One thing before class: sign the waiver" with the QR and stays up 12 seconds. The staff roster row shows "no waiver". The Worker writes `checkin_last_at` to that contact right away (the same allowed write as the rollup) and your GHL workflow sends the message. The Worker never sends messages itself. Empty `WAIVER_TAG` turns the whole feature off.
 
+## Incident, 2026-09-17: check-ins silently dropped
+
+The waiver deploy went out before `002_waiver.sql` was applied. Every check-in read a column that did not exist, returned 500, and the kiosk queued it and showed the student a checkmark anyway. `/health` stayed green because it never read that column. Found when the kiosk footer showed "2 check-ins waiting to sync" and a reload did not clear it.
+
+Fixed by applying the migration. Hardened so it cannot repeat or hide:
+- `src/schema-caps.js` asks the database whether the optional column exists, cached per isolate. Check-in, staff roster, member lookup and roster sync all branch on it, so a pending migration degrades the waiver feature and leaves attendance working.
+- `/health` now reports `schemaCurrent` and returns 503 naming the missing migration.
+- The kiosk drains its offline queue on `visibilitychange` and `pageshow`, not only the 30 s timer. iOS suspends timers on a sleeping iPad, which is why the retries never fired.
+
+If the footer ever shows a stuck queue again: check `/health` first. `schemaCurrent: false` means a migration is pending.
+
 ## Still open after go-live
 
 - Rotate `STAFF_PIN`; the first one was pasted into a chat.

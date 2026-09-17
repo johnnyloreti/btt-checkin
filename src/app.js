@@ -5,6 +5,7 @@ import { syncRoster } from './roster.js';
 import { fetchAllContacts, fetchCustomFieldIds, ghlPutContactCustomFields } from './ghl.js';
 import { runRollup } from './rollup.js';
 import { notifyWaiverCheckin, waiverEnabled } from './waiver.js';
+import { hasWaiverColumn } from './schema-caps.js';
 import { isStaff, pinMatches, issueToken, cookieHeader, SESSION_MS } from './staff-auth.js';
 import { buildIdMap, opaqueId, requireSalt } from './ids.js';
 import { matchClasses, windowFromEnv } from './classes.js';
@@ -36,6 +37,7 @@ export async function health(env, schedule) {
     lastRollup: null,
     lastRollupOutcome: null,
     pendingRollups: null,
+    schemaCurrent: null,
     schedulePresent: Boolean(schedule && Array.isArray(schedule.classes) && schedule.classes.length > 0),
   };
   try {
@@ -59,6 +61,13 @@ export async function health(env, schedule) {
       out.lastRollupOutcome = rollup.outcome;
     }
     out.pendingRollups = pending ? Number(pending.n) : 0;
+    // A migration Johnny has not run yet. Surfaced here so a half-applied
+    // deploy is visible rather than silent (see schema-caps.js).
+    out.schemaCurrent = await hasWaiverColumn(env);
+    if (!out.schemaCurrent) {
+      out.ok = false;
+      out.error = 'members.waiver missing: run src/db/migrations/002_waiver.sql';
+    }
   } catch (e) {
     out.ok = false;
     out.error = `d1: ${e && e.message ? e.message : String(e)}`;
@@ -102,7 +111,9 @@ export async function publicRoster(env, schedule) {
 export async function resolveMember(env, id) {
   if (typeof id !== 'string' || !/^[0-9a-f]{20}$/.test(id)) return null;
   const salt = requireSalt(env);
-  const { results } = await env.DB.prepare('SELECT ghl_contact_id, first_name, active, waiver FROM members').all();
+  // waiver is optional: never name it unless the migration has run (see schema-caps.js).
+  const cols = (await hasWaiverColumn(env)) ? 'ghl_contact_id, first_name, active, waiver' : 'ghl_contact_id, first_name, active';
+  const { results } = await env.DB.prepare(`SELECT ${cols} FROM members`).all();
   const map = await buildIdMap(results, salt);
   return map.get(id) || null;
 }
