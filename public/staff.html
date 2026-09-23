@@ -38,6 +38,11 @@
   .row .remove { font: inherit; font-size: 14px; font-weight: 600; background: none; border: 1px solid var(--line); color: var(--muted); padding: 8px 12px; border-radius: 10px; cursor: pointer; }
   .row .remove.confirm { color: #1a1607; background: var(--gold); border-color: var(--gold); }
   .empty { color: var(--muted); padding: 20px 4px; font-size: 17px; }
+  .note { color: var(--muted); font-size: 15px; margin: -6px 0 16px; }
+  .row .since { color: var(--gold); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .row .award { font: inherit; font-size: 14px; font-weight: 600; background: var(--gold); border: 1px solid var(--gold); color: #1a1607; padding: 8px 12px; border-radius: 10px; cursor: pointer; }
+  .row .award.confirm { background: transparent; color: var(--gold); }
+  .row .undo { font: inherit; font-size: 14px; font-weight: 600; background: none; border: 1px solid var(--line); color: var(--muted); padding: 8px 12px; border-radius: 10px; cursor: pointer; }
   .btn { font-family: var(--display); font-weight: 600; font-size: 22px; letter-spacing: .06em; text-transform: uppercase; padding: 16px; border-radius: 14px; border: 2px solid var(--line); background: transparent; color: var(--bone); cursor: pointer; width: 100%; margin-top: 14px; }
   .btn.primary { background: var(--gold); color: #1a1607; border-color: var(--gold); }
   .back { font: inherit; font-size: 16px; color: var(--muted); background: none; border: none; padding: 8px 0; cursor: pointer; }
@@ -65,6 +70,7 @@
 <header>
   <span class="brand">BTT Staff</span>
   <button class="tab active" data-tab="tonight" type="button">Tonight</button>
+  <button class="tab" data-tab="stripes" type="button">Stripes</button>
   <button class="tab" data-tab="members" type="button">Members</button>
   <button class="tab quiet" id="signout" type="button">Sign out</button>
 </header>
@@ -90,6 +96,12 @@
     <button class="btn primary" id="add-student" type="button">+ Add student</button>
   </section>
 
+  <section id="stripes" class="view">
+    <h2>Stripes <span class="sub" id="stripes-rule"></span></h2>
+    <p class="note" id="stripes-note">Eligible for review. Class count is one input, the call is yours.</p>
+    <div id="stripes-list" class="list"></div>
+  </section>
+
   <section id="members" class="view">
     <h2>Members</h2>
     <input id="member-search" class="search" type="text" placeholder="Search any member" autocomplete="off" autocorrect="off" autocapitalize="words" spellcheck="false">
@@ -100,6 +112,8 @@
     <button class="back" id="member-back" type="button">&#8249; Back to members</button>
     <h2 id="member-title"></h2>
     <div id="member-facts" class="facts"></div>
+    <h2 style="font-size:22px">Stripes and belts</h2>
+    <div id="member-promotions" class="list"></div>
     <h2 style="font-size:22px">Last 30 days</h2>
     <div id="member-history" class="list"></div>
   </section>
@@ -164,7 +178,7 @@
   }
   function showView(id) {
     for (const v of document.querySelectorAll('.view')) v.classList.toggle('active', v.id === id);
-    const tab = id === 'tonight' || id === 'class' ? 'tonight' : 'members';
+    const tab = id === 'tonight' || id === 'class' ? 'tonight' : id === 'stripes' ? 'stripes' : 'members';
     for (const t of document.querySelectorAll('.tab[data-tab]')) t.classList.toggle('active', t.dataset.tab === tab);
     window.scrollTo(0, 0);
   }
@@ -277,6 +291,10 @@
     $('add-overlay').classList.add('active');
     $('add-search').focus();
     await loadRoster();
+    // Staff type the moment the overlay opens, which can beat the roster
+    // fetch. Render again with whatever is already in the box, or their
+    // first few letters would show nothing until they typed another.
+    if ($('add-search').value) renderTiles($('add-tiles'), $('add-search').value, addMember);
   });
   $('add-close').addEventListener('click', () => $('add-overlay').classList.remove('active'));
   $('add-search').addEventListener('input', () => renderTiles($('add-tiles'), $('add-search').value, addMember));
@@ -302,6 +320,58 @@
     }
   }
 
+  // ---------- stripes (§15.2) ----------
+  async function loadStripes() {
+    const list = $('stripes-list');
+    list.innerHTML = '';
+    let data;
+    try {
+      data = await api('/api/staff/stripes');
+    } catch (e) {
+      list.appendChild(el('div', 'empty', e.message));
+      return;
+    }
+    $('stripes-rule').textContent = data.threshold ? `every ${data.threshold} classes` : '';
+    if (!data.enabled) {
+      $('stripes-note').textContent = '';
+      list.appendChild(el('div', 'empty', data.pendingMigration ? 'Stripe tracking needs its database migration.' : 'Stripe tracking is off.'));
+      return;
+    }
+    $('stripes-note').textContent = 'Eligible for review. Class count is one input, the call is yours.';
+    if (data.rows.length === 0) {
+      list.appendChild(el('div', 'empty', 'Nobody is eligible right now'));
+      return;
+    }
+    for (const r of data.rows) {
+      const row = el('div', 'row');
+      row.dataset.id = r.id;
+      row.append(
+        el('span', 'name', `${r.first} ${r.last}`.trim()),
+        el('span', 'since', `${r.since} since ${r.lastAwardedOn ? 'last stripe' : 'their first class'}`),
+      );
+      if (r.worth > 1) row.appendChild(el('span', 'tag warn', `${r.worth} worth`));
+      const award = el('button', 'award', 'Record stripe');
+      award.type = 'button';
+      award.addEventListener('click', async () => {
+        if (!award.classList.contains('confirm')) {
+          award.classList.add('confirm');
+          award.textContent = 'Confirm stripe';
+          setTimeout(() => { award.classList.remove('confirm'); award.textContent = 'Record stripe'; }, 4000);
+          return;
+        }
+        try {
+          await post('/api/staff/promote', { contactId: r.id, kind: 'stripe' });
+          toast(`Stripe recorded for ${r.first}`);
+          await loadStripes();
+        } catch (e) {
+          toast(`Could not record: ${e.message}`);
+        }
+      });
+      row.appendChild(award);
+      list.appendChild(row);
+    }
+  }
+
   // ---------- members ----------
   $('member-search').addEventListener('input', async () => {
     await loadRoster();
@@ -319,6 +389,7 @@
     fact('Waiver', d.waiver ? 'On file' : 'Missing', !d.waiver);
     fact('Roster synced', d.syncedAt ? `${fmtDate(d.syncedAt.slice(0, 10))} ${fmtClock(d.syncedAt)}` : 'never');
     fact('GHL rollup', d.rollupPending ? 'Pending tonight' : 'Up to date');
+    renderPromotions(d, m);
     const list = $('member-history');
     list.innerHTML = '';
     if (d.last30.length === 0) list.appendChild(el('div', 'empty', 'No check-ins in the last 30 days'));
@@ -335,12 +406,46 @@
     }
     showView('member');
   }
+  function renderPromotions(d, m) {
+    const box = $('member-promotions');
+    box.innerHTML = '';
+    const promos = Array.isArray(d.promotions) ? d.promotions : [];
+    if (promos.length === 0) {
+      box.appendChild(el('div', 'empty', 'No stripes or belts recorded'));
+      return;
+    }
+    promos.forEach((p, i) => {
+      const row = el('div', 'row');
+      row.append(
+        el('span', 'time', fmtDate(p.awardedOn)),
+        el('span', 'name', p.kind === 'belt' ? 'Belt' : 'Stripe'),
+        el('span', 'time', `at class ${p.atClassCount}`),
+      );
+      if (i === 0) {
+        const undo = el('button', 'undo', 'Undo');
+        undo.type = 'button';
+        undo.addEventListener('click', async () => {
+          if (undo.textContent === 'Undo') {
+            undo.textContent = 'Confirm undo';
+            setTimeout(() => { undo.textContent = 'Undo'; }, 4000);
+            return;
+          }
+          await post('/api/staff/promote/undo', { contactId: m.id });
+          toast('Removed');
+          await openMember(m);
+        });
+        row.appendChild(undo);
+      }
+      box.appendChild(row);
+    });
+  }
   $('member-back').addEventListener('click', () => showView('members'));
 
   // ---------- nav ----------
   for (const t of document.querySelectorAll('.tab[data-tab]')) {
     t.addEventListener('click', async () => {
       if (t.dataset.tab === 'tonight') { showView('tonight'); await loadTonight(); }
+      else if (t.dataset.tab === 'stripes') { showView('stripes'); await loadStripes(); }
       else { showView('members'); $('member-search').focus(); }
     });
   }

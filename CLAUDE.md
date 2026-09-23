@@ -396,3 +396,21 @@ So, for any migration from here on:
 - **No optional column may be named unconditionally in a query on the check-in path.** Ask `hasWaiverColumn` in `src/schema-caps.js` first and build the SQL accordingly. A pending migration must degrade the feature, never break attendance.
 - **`/health` reports `schemaCurrent`** and goes `ok: false` with the migration filename when a column is missing. A half-applied deploy is visible.
 - Apply the migration before the deploy that needs it, but the deploy must survive the other order.
+
+### 15.2 Stripe tracking (approved 2026-09-23)
+
+Staff need to know who is due to be looked at for a stripe. Johnny: "start with kids, 7 classes per stripe."
+
+**Framing.** The tab surfaces who has crossed a threshold. It never says a promotion is owed. Class count is one input; the instructor decides. Headings read "eligible for review", rows read "N classes since last stripe".
+
+**Eligibility.** For a member whose programs include one of `STRIPE_PROGRAMS`, count attended classes since their last recorded promotion (all attended classes if none). Eligible when that reaches `STRIPE_CLASSES`. A member 22 classes past their last stripe is worth three, so the row shows the count, not a yes/no.
+
+**Recording.** A button on the row writes a `promotions` row holding who, kind, the ET date, and their lifetime count at that moment. That clears them from the list and starts the next interval. The member screen shows promotion history, with an undo on the most recent for a mis-tap.
+
+**Config in `wrangler.toml`:**
+- `STRIPE_CLASSES = "7"`
+- `STRIPE_PROGRAMS = "kids-3-5,kids-6-9,kids-10-14"` — empty turns the feature off, adults added when Johnny says so.
+
+**Schema:** a `promotions` table. Migration `src/db/migrations/003_promotions.sql`. Per the §15.1 rule, every query must tolerate the table not existing yet: `hasPromotionsTable` in `src/schema-caps.js`, and a pending migration hides the tab rather than breaking the staff page.
+
+**Not built, deliberately.** No GHL notification. That would need a sixth custom field key, which is Johnny's to create and name (§0.2), and the tab removes most of the need. Offer it once the tab has been used.

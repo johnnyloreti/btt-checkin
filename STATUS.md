@@ -73,6 +73,26 @@ Fixed by applying the migration. Hardened so it cannot repeat or hide:
 
 If the footer ever shows a stuck queue again: check `/health` first. `schemaCurrent: false` means a migration is pending.
 
+## V2: stripe tracking (§15.2)
+
+Built 2026-09-23. Kids programs, 7 classes per stripe. Needs, in this order:
+
+1. D1 migration, once, **before** the deploy:
+```
+wrangler d1 execute btt-checkin --remote --file=src/db/migrations/003_promotions.sql
+```
+2. `wrangler deploy`.
+
+Then a **Stripes** tab appears on `/staff`. It lists members on a kids program who have reached 7 attended classes since their last recorded stripe, most overdue first, with a "3 worth" tag when someone is several intervals past. Two taps record a stripe, which clears them and starts the next interval. Member lookup gains a stripes and belts history with an undo on the most recent, for a mis-tap.
+
+Tune in `wrangler.toml`: `STRIPE_CLASSES` (currently 7) and `STRIPE_PROGRAMS` (currently the three kids programs; add `adult` when you want it, or blank the value to hide the tab).
+
+Wording is deliberate: "eligible for review", never "due". The count is one input; the promotion is your call.
+
+Deploying before the migration is safe now: the tab reports that its migration is pending and the rest of the staff page keeps working.
+
+Not built: a GHL notification on a threshold. That needs a sixth custom field, which is yours to create and name. The tab covers most of the need; ask if you still want the alert.
+
 ## Still open after go-live
 
 - Rotate `STAFF_PIN`; the first one was pasted into a chat.

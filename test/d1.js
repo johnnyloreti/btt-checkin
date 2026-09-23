@@ -10,15 +10,19 @@ import { resetSchemaCaps } from '../src/schema-caps.js';
 const SCHEMA = readRepoFile('src/db/schema.sql');
 
 /**
- * `legacy: true` gives a database as it stood before a pending migration:
- * members without the waiver column. Used to prove that a deploy running
- * ahead of its migration degrades instead of breaking check-ins.
+ * A database as it stood before a pending migration:
+ *   legacy: true        members without the waiver column (002)
+ *   noPromotions: true  no promotions table (003)
+ *
+ * Used to prove that a deploy running ahead of its migration degrades
+ * instead of breaking.
  */
-export function memoryD1({ legacy = false } = {}) {
+export function memoryD1({ legacy = false, noPromotions = false } = {}) {
   resetSchemaCaps();
   const db = new DatabaseSync(':memory:');
   db.exec(SCHEMA);
   if (legacy) db.exec('ALTER TABLE members DROP COLUMN waiver');
+  if (noPromotions) db.exec('DROP TABLE promotions');
 
   const isSelect = (sql) => /^\s*(select|with|pragma)\b/i.test(sql);
 

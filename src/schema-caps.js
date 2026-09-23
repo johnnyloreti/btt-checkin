@@ -12,6 +12,7 @@
 
 const UNKNOWN = null;
 let waiverColumn = UNKNOWN;
+let promotionsTable = UNKNOWN;
 
 /** True when members.waiver exists. Cached per isolate; one query at most. */
 export async function hasWaiverColumn(env) {
@@ -27,7 +28,22 @@ export async function hasWaiverColumn(env) {
   return waiverColumn;
 }
 
+/** True when the promotions table exists (§15.2). Cached per isolate. */
+export async function hasPromotionsTable(env) {
+  if (promotionsTable !== UNKNOWN) return promotionsTable;
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'promotions'",
+    ).all();
+    promotionsTable = results.length > 0;
+  } catch {
+    promotionsTable = false;
+  }
+  return promotionsTable;
+}
+
 /** Test hook, and a way to re-check after a migration without a redeploy. */
 export function resetSchemaCaps() {
   waiverColumn = UNKNOWN;
+  promotionsTable = UNKNOWN;
 }

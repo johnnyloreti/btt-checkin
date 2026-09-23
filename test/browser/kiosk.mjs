@@ -81,7 +81,9 @@ async function step(name, fn) {
     console.log(`ok   ${name}`);
   } catch (e) {
     failures += 1;
-    console.log(`FAIL ${name}\n     ${e.message.split('\n')[0]}`);
+    const lines = e.message.split('\n');
+    const waiting = lines.find((l) => /waiting for|locator\(/.test(l));
+    console.log(`FAIL ${name}\n     ${lines[0]}${waiting ? `\n     ${waiting.trim()}` : ''}`);
     if (activePage) await activePage.reload().catch(() => {});
   }
 }

@@ -25,7 +25,7 @@ mkdirSync(OUT, { recursive: true });
 
 const schedule = loadSchedule(readFileSync(join(ROOT, 'schedule.json'), 'utf8'));
 const NOW = new Date('2026-09-05T15:05:00Z'); // Sat 11:05 ET
-const env = { MEMBER_TAGS: 'founding-member', MEMBER_TAG_PREFIXES: 'foundations-', STAFF_PIN: '1234', ID_SALT: 'browser-test-salt', TZ: 'America/New_York', DB: memoryD1() };
+const env = { MEMBER_TAGS: 'founding-member', MEMBER_TAG_PREFIXES: 'foundations-', STAFF_PIN: '1234', ID_SALT: 'browser-test-salt', TZ: 'America/New_York', STRIPE_CLASSES: '7', STRIPE_PROGRAMS: 'kids-3-5,kids-6-9,kids-10-14', DB: memoryD1() };
 await syncRoster(env, schedule, { fetchContacts: async () => ({ contacts: CONTACTS, pages: 1 }), now: new Date(NOW.getTime() - 3600_000) });
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8' };
 env.ASSETS = {
@@ -105,9 +105,22 @@ await step('class roster: empty, then add a student via search, then remove with
   assert.equal(db[0].status, 'voided');
   assert.equal(db[0].method, 'staff');
 });
+await step('typing the instant the add overlay opens still finds the member', async () => {
+  // The overlay focuses the box before the roster fetch resolves. Typing
+  // into that gap must not leave the list empty.
+  await page.click('#add-student');
+  await page.waitForSelector('#add-overlay.active');
+  await page.fill('#add-search', 'emm');           // no wait: race the fetch
+  await page.waitForSelector('#add-tiles .tile', { timeout: 5000 });
+  assert.match((await page.locator('#add-tiles .tile').allTextContents()).join(' '), /Emma Jones/);
+  await page.click('#add-close');
+});
+
 await step('back to Tonight reflects the count', async () => {
   await page.click('#add-student');
+  await page.waitForSelector('#add-overlay.active');
   await page.fill('#add-search', 'emma');
+  await page.waitForSelector('#add-tiles .tile');
   await page.click('#add-tiles .tile:has-text("Emma Jones")');
   await page.waitForSelector('#class-list .row');
   await page.click('#class-back');
@@ -139,6 +152,49 @@ await step('sync now posts and reports', async () => {
   await page.waitForFunction(() => /Synced|Sync/.test(document.getElementById('toast').textContent), null, { timeout: 10000 }).catch(() => {});
   assert.match(await page.locator('#toast').textContent(), /Synced 7 members/);
 });
+await step('stripes: eligible kid listed, recorded on a two-tap confirm, then cleared', async () => {
+  // Seven attended classes for Jack, on distinct past dates.
+  const ins = env.DB.raw.prepare("INSERT INTO attendance (ghl_contact_id, class_name, class_start_local, checked_in_at, method) VALUES ('c_jack', 'Kids 6-9', ?, ?, 'kiosk')");
+  for (let i = 1; i <= 7; i += 1) ins.run(`2026-08-0${i}T16:30`, `2026-08-0${i}T20:30:00Z`);
+
+  await page.click('.tab[data-tab="stripes"]');
+  await page.waitForSelector('#stripes-list .row');
+  const rows = await page.locator('#stripes-list .row').allTextContents();
+  assert.equal(rows.length, 1, `expected one eligible, got ${rows.length}`);
+  assert.match(rows[0], /Jack Silva/);
+  assert.match(rows[0], /7 since their first class/);
+  assert.match(await page.locator('#stripes-note').textContent(), /Eligible for review/);
+  await page.screenshot({ path: join(OUT, 'staff-stripes.png') });
+
+  // One tap arms, the second records.
+  await page.click('#stripes-list .award');
+  assert.equal(await page.locator('#stripes-list .award').textContent(), 'Confirm stripe');
+  await page.click('#stripes-list .award');
+  await page.waitForFunction(() => /Nobody is eligible/.test(document.getElementById('stripes-list').textContent));
+  // node:sqlite rows have a null prototype, so compare fields, not objects.
+  const stored = env.DB.raw.prepare('SELECT kind, at_class_count FROM promotions').all();
+  assert.equal(stored.length, 1);
+  assert.equal(stored[0].kind, 'stripe');
+  assert.equal(stored[0].at_class_count, 7);
+});
+
+await step('the award shows on the member screen and undo removes it', async () => {
+  await page.click('.tab[data-tab="members"]');
+  await page.fill('#member-search', 'jack');
+  await page.waitForSelector('#member-tiles .tile');
+  await page.click('#member-tiles .tile:has-text("Jack Silva")');
+  await page.waitForSelector('#member.active');
+  await page.waitForFunction(() => /Stripe/.test(document.getElementById('member-promotions').textContent));
+  assert.match(await page.locator('#member-promotions').textContent(), /at class 7/);
+  await page.screenshot({ path: join(OUT, 'staff-member-stripes.png') });
+
+  await page.click('#member-promotions .undo');
+  assert.equal(await page.locator('#member-promotions .undo').textContent(), 'Confirm undo');
+  await page.click('#member-promotions .undo');
+  await page.waitForFunction(() => /No stripes or belts recorded/.test(document.getElementById('member-promotions').textContent));
+  assert.equal(env.DB.raw.prepare('SELECT COUNT(*) AS n FROM promotions').get().n, 0);
+});
+
 await step('sign out returns to the login page', async () => {
   await page.click('#signout');
   await page.waitForSelector('#pin');

@@ -6,6 +6,7 @@ import { fetchAllContacts, fetchCustomFieldIds, ghlPutContactCustomFields } from
 import { runRollup } from './rollup.js';
 import { notifyWaiverCheckin, waiverEnabled } from './waiver.js';
 import { hasWaiverColumn } from './schema-caps.js';
+import { stripeCandidates, recordPromotion, undoLastPromotion, promotionHistory, stripesEnabled } from './promotions.js';
 import { isStaff, pinMatches, issueToken, cookieHeader, SESSION_MS } from './staff-auth.js';
 import { buildIdMap, opaqueId, requireSalt } from './ids.js';
 import { matchClasses, windowFromEnv } from './classes.js';
@@ -279,7 +280,35 @@ export function createApp(schedule, deps = defaultDeps()) {
             const member = await resolveMember(env, url.searchParams.get('id'));
             if (!member) return json({ error: 'unknown member' }, 404);
             const history = await memberHistory(env, schedule, member.ghl_contact_id, now());
-            return json(history);
+            return json({ ...history, promotions: await promotionHistory(env, member.ghl_contact_id) });
+          }
+
+          // ---- stripes (§15.2) ----
+          if (method === 'GET' && path === '/api/staff/stripes') {
+            const salt = requireSalt(env);
+            const list = await stripeCandidates(env);
+            const rows = [];
+            for (const r of list.rows) {
+              const { ghl_contact_id: contactId, ...rest } = r;
+              rows.push({ id: await opaqueId(contactId, salt), ...rest });
+            }
+            return json({ ...list, rows });
+          }
+          if (method === 'POST' && (path === '/api/staff/promote' || path === '/api/staff/promote/undo')) {
+            if (!stripesEnabled(env)) return json({ error: 'stripe tracking is off' }, 404);
+            const body = await readJson(request);
+            if (!body) return json({ error: 'expected JSON body' }, 400);
+            const member = await resolveMember(env, body.contactId);
+            if (!member) return json({ error: 'unknown member' }, 404);
+            if (path === '/api/staff/promote/undo') {
+              return json(await undoLastPromotion(env, member.ghl_contact_id));
+            }
+            return json(await recordPromotion(env, schedule, {
+              contactId: member.ghl_contact_id,
+              kind: body.kind,
+              note: body.note,
+              now: now(),
+            }));
           }
         }
 
