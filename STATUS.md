@@ -100,7 +100,38 @@ Not built: a GHL notification on a threshold. That needs a sixth custom field, w
 - iPad: Add to Home Screen, Guided Access, auto-lock off.
 - Consider Workers Paid ($5/month) for the request and D1 caps.
 
-## Deploy (PowerShell, inside `C:\Users\Johnm\btt-checkin`)
+## Shipping a change from a session branch
+
+The agent pushes to a `claude/...` branch. You merge it into `main` and deploy.
+**Fetch first.** `git merge --ff-only origin/<branch>` merges your *local copy*
+of that remote branch. If the copy is stale the merge is a silent no-op that
+says "Already up to date", and you then deploy the code you already had. That
+happened on 2026-09-24: two commits looked merged and deployed, and neither
+was.
+
+```
+git fetch origin
+```
+```
+git merge --ff-only origin/<branch>
+```
+```
+git push origin main
+```
+```
+wrangler deploy
+```
+
+Two lines in the deploy output tell you it really went out:
+
+- the bindings list shows any new `env.*` var the change added
+- the asset upload says `+ /staff.html` or `+ /index.html` when a page changed,
+  not "No updated asset files to upload"
+
+If a change adds a migration, run it before the deploy that needs it (§15.1),
+and check `/health` afterwards for `schemaCurrent`.
+
+## Deploy, first time (PowerShell, inside `C:\Users\Johnm\btt-checkin`)
 
 ```
 git pull origin main
