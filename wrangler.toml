@@ -13,19 +13,25 @@ GHL_LOCATION_ID = "ARCSFhJ0JlkcuzfZtyEJ"
 TZ = "America/New_York"
 MEMBER_TAGS = "founding-member"
 MEMBER_TAG_PREFIXES = "foundations-"
-# Waiver prompt (§15.1). The tag a signed waiver leaves on the student's
-# contact, and the custom field written at check-in when it is missing so a
-# GHL workflow can send the reminder. Empty WAIVER_TAG turns the feature off.
+
 # Check-in window in minutes: how long before a class starts, and how long
 # after it starts, a member may still check in to it. 180/180 set 2026-09-16.
 CHECKIN_EARLY_MIN = "180"
 CHECKIN_LATE_MIN = "180"
+
+# How many days back a check-in may be dated. The kiosk only needs room for a
+# queued retry to land; staff need room to backfill a class nobody tapped for.
+KIOSK_BACKDATE_DAYS = "3"
+STAFF_BACKDATE_DAYS = "30"
 
 # Stripe tab (§15.2). Classes between stripes, and which programs it covers.
 # An empty STRIPE_PROGRAMS turns the tab off. Adults added when Johnny says so.
 STRIPE_CLASSES = "7"
 STRIPE_PROGRAMS = "kids-3-5,kids-6-9,kids-10-14"
 
+# Waiver prompt (§15.1). The tag a signed waiver leaves on the student's
+# contact, and the custom field written at check-in when it is missing so a
+# GHL workflow can send the reminder. Empty WAIVER_TAG turns the feature off.
 WAIVER_TAG = "waiver-signed"
 WAIVER_FIELD = "checkin_last_at"
 

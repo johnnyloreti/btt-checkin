@@ -25,7 +25,7 @@
 3. **Voided rows come back.** If staff remove someone and that person then checks in again for the same class, the row is set back to attended. Staff see the new tap time.
 4. **Open mat.** "Check in anyway" records `open mat / unscheduled` at `T00:00` for that date, once per member per day.
 5. **Inactive members** appear on the kiosk and can check in. The record carries `status_at_checkin = inactive`. Staff see an inactive tag on the roster row.
-6. **Late queued check-ins** are accepted for up to three days back. Anything older is refused.
+6. **Backdating.** The kiosk accepts a queued check-in up to three days back and refuses anything older, so a tap stranded on an iPad that lost wifi cannot surface weeks later. Staff reach back thirty days, so a class nobody tapped for can still be filled in. `KIOSK_BACKDATE_DAYS` and `STAFF_BACKDATE_DAYS` in `wrangler.toml`, in whole days.
 7. **Rollup week** is Monday to Sunday in ET. At Monday 03:00 the week count resets to zero for everyone.
 8. **One cron trigger.** A single every-30-minutes schedule runs the roster sync on every tick and the rollup on the tick that is 03:00 ET, whatever DST is doing. One trigger because Workers Free allows 5 per account and btt-ops uses some of them.
 9. **Compatibility date** is 2026-08-01. Wrangler is pinned to the 4.129 line.
@@ -171,6 +171,7 @@ wrangler d1 execute btt-checkin --remote --command "SELECT ran_at, job, outcome,
 - The staff page has a Sync roster now button. The rollup runs nightly at 03:00 ET or on demand with the command above.
 - To change the schedule, edit `schedule.json`, run `npm test`, commit, push, `wrangler deploy`.
 - A failed check-in on the iPad is queued and retried every 30 seconds. A small line at the bottom of the kiosk shows how many are waiting.
+- **To fill in a class nobody tapped for:** open `/staff`, walk the date bar back to that day, tap the class, then Add student for each person. It reaches back thirty days. The record lands on that class, not today, so last-attended and the 30-day and week counts all come out right in GHL on the next nightly rollup.
 
 ## Local development
 

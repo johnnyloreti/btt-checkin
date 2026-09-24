@@ -127,7 +127,7 @@ Kids 6-9  11:00 AM
 [ Remove ] on each row (soft delete: sets status = "voided", never hard deletes)
 ```
 
-**Add student** opens the same search as the kiosk and records attendance with `method = "staff"`.
+**Add student** opens the same search as the kiosk and records attendance with `method = "staff"`. Tonight's date bar goes back, so a class nobody tapped for can be filled in later: a staff add reaches back `STAFF_BACKDATE_DAYS` (30) where the kiosk reaches back `KIOSK_BACKDATE_DAYS` (3). (Split by Johnny, 2026-09-24; both were 3.) The row lands on the class it names, so `attendance_last`, `attendance_30d` and `attendance_week` all come out on the right date. `checked_in_at` stays the staff tap, which is the truth.
 
 **Member lookup** (search any member): last 30 days of attendance, lifetime count, sync status. Read-only in V1.
 
@@ -279,6 +279,7 @@ Vars in `wrangler.toml`:
 - `MEMBER_TAGS = "founding-member"`
 - `MEMBER_TAG_PREFIXES = "foundations-"`
 - `CHECKIN_EARLY_MIN = "180"` and `CHECKIN_LATE_MIN = "180"` (§2 window, minutes)
+- `KIOSK_BACKDATE_DAYS = "3"` and `STAFF_BACKDATE_DAYS = "30"` (§3 backdating, whole days)
 
 `.dev.vars.example` committed; `.dev.vars` gitignored. Parser must handle CRLF and BOM.
 
@@ -297,6 +298,7 @@ Vitest or node test runner, fixtures only, no network. Minimum:
 7. Write scanner: no GHL write other than `PUT /contacts/{id}`.
 8. Schedule validation: rejects overlap, bad day, bad time.
 9. Kiosk page: never contains an email, phone, or the string "billing" in rendered HTML.
+10. Backdating: the kiosk and staff limits and their exact edges, a stale `clientTs` on a staff backfill, config override and fallback.
 
 ---
 

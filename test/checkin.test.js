@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { recordCheckin } from '../src/checkin.js';
+import { backdateFromEnv, recordCheckin } from '../src/checkin.js';
 import { UNSCHEDULED_CLASS } from '../src/classes.js';
 import { loadSchedule } from '../src/schedule.js';
 import { readRepoFile } from './helpers.js';
@@ -113,10 +113,64 @@ test('rejects future dates and dates older than the retry window', async () => {
   assert.match(future.body.error, /future/);
   const old = await recordCheckin({ DB }, schedule, base({ classStartLocal: '2026-09-01T16:30' }));
   assert.equal(old.status, 400);
-  assert.match(old.body.error, /past/);
+  assert.match(old.body.error, /more than 3 days ago/);
   // Three days back is allowed (queued kiosk retries).
   const ok = await recordCheckin({ DB }, schedule, base({ classStartLocal: '2026-09-02T16:30' }));
   assert.equal(ok.status, 200);
+});
+
+test('staff reach back a month where the kiosk reaches back three days', async () => {
+  const DB = memoryD1();
+  const threeWeeks = { classStartLocal: '2026-08-15T11:00' }; // Sat Kids 6-9
+  const kiosk = await recordCheckin({ DB }, schedule, base(threeWeeks));
+  assert.equal(kiosk.status, 400, 'kiosk stays tight');
+  assert.match(kiosk.body.error, /more than 3 days ago/);
+
+  const staff = await recordCheckin({ DB }, schedule, base({ ...threeWeeks, method: 'staff' }));
+  assert.equal(staff.status, 200);
+  const row = DB.raw.prepare('SELECT * FROM attendance').get();
+  assert.equal(row.class_start_local, '2026-08-15T11:00', 'lands on the class it names');
+  assert.equal(row.method, 'staff');
+});
+
+test('staff backfill is recorded as tapped now, not at the old class time', async () => {
+  const DB = memoryD1();
+  await recordCheckin(
+    { DB },
+    schedule,
+    base({ classStartLocal: '2026-08-15T11:00', method: 'staff', clientTs: '2026-08-15T15:00:00Z' }),
+  );
+  assert.equal(DB.raw.prepare('SELECT checked_in_at FROM attendance').get().checked_in_at, NOW.toISOString());
+});
+
+test('the staff reach has an edge too', async () => {
+  const DB = memoryD1();
+  const ok = await recordCheckin({ DB }, schedule, base({ classStartLocal: '2026-08-06T16:30', method: 'staff' }));
+  assert.equal(ok.status, 200, 'thirty days back');
+  const tooOld = await recordCheckin({ DB }, schedule, base({ classStartLocal: '2026-08-05T16:30', method: 'staff' }));
+  assert.equal(tooOld.status, 400, 'thirty-one days back');
+  assert.match(tooOld.body.error, /more than 30 days ago/);
+});
+
+test('both limits are config, and bad config falls back', async () => {
+  assert.deepEqual(backdateFromEnv({}), { kiosk: 3, staff: 30 });
+  assert.deepEqual(backdateFromEnv({ KIOSK_BACKDATE_DAYS: '0', STAFF_BACKDATE_DAYS: '90' }), { kiosk: 0, staff: 90 });
+  for (const bad of ['', '  ', 'soon', '-1', '4.5', undefined, null]) {
+    assert.deepEqual(backdateFromEnv({ KIOSK_BACKDATE_DAYS: bad, STAFF_BACKDATE_DAYS: bad }), { kiosk: 3, staff: 30 }, String(bad));
+  }
+
+  const DB = memoryD1();
+  const env = { DB, STAFF_BACKDATE_DAYS: '7' };
+  const r = await recordCheckin(env, schedule, base({ classStartLocal: '2026-08-15T11:00', method: 'staff' }));
+  assert.equal(r.status, 400);
+  assert.match(r.body.error, /more than 7 days ago/);
+});
+
+test('a same-day staff add is unchanged', async () => {
+  const DB = memoryD1();
+  const r = await recordCheckin({ DB }, schedule, base({ method: 'staff' }));
+  assert.equal(r.status, 200);
+  assert.equal(DB.raw.prepare('SELECT method FROM attendance').get().method, 'staff');
 });
 
 test('clientTs is kept when sane, replaced by server time otherwise', async () => {

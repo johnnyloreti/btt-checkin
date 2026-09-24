@@ -1,9 +1,41 @@
-// checkin.js — record attendance (§2, §5). Used by the kiosk route now and
-// the staff add route in step 5.
+// checkin.js — record attendance (§2, §5). Used by the kiosk route and the
+// staff add route.
 
-import { validateClassChoice } from './classes.js';
+import { shiftDate, validateClassChoice } from './classes.js';
 
-const MAX_PAST_DAYS = 3; // queued kiosk retries can arrive late; anything older is refused
+/**
+ * How far back a check-in may be dated, in whole days.
+ *
+ * The kiosk needs only enough room for a queued retry to land: a record
+ * sitting in localStorage on an iPad that lost wifi. Keeping that tight is
+ * what stops a stale queued tap from appearing weeks later on a roster
+ * nobody is looking at any more.
+ *
+ * Staff need room to backfill a class nobody tapped for — the iPad was in
+ * the office, the class ran anyway — so their reach is a month. A staff add
+ * is a deliberate act by someone who is signed in, and it lands on the class
+ * it names, so every rollup number comes out on the right date.
+ *
+ * Both are overridable per deploy with KIOSK_BACKDATE_DAYS /
+ * STAFF_BACKDATE_DAYS in wrangler.toml.
+ */
+export const KIOSK_BACKDATE_DAYS = 3;
+export const STAFF_BACKDATE_DAYS = 30;
+
+/** The configured backdate limits, falling back to the defaults above. */
+export function backdateFromEnv(env = {}) {
+  const days = (value, fallback) => {
+    const raw = String(value ?? '').trim();
+    if (raw === '') return fallback; // unset, or blank in wrangler.toml
+    const n = Number(raw);
+    return Number.isInteger(n) && n >= 0 ? n : fallback;
+  };
+  return {
+    kiosk: days(env.KIOSK_BACKDATE_DAYS, KIOSK_BACKDATE_DAYS),
+    staff: days(env.STAFF_BACKDATE_DAYS, STAFF_BACKDATE_DAYS),
+  };
+}
+
 const MAX_TS_SKEW_MS = 5 * 60 * 1000;
 
 function isoOrNull(s) {
@@ -27,18 +59,21 @@ export async function recordCheckin(env, schedule, input) {
   const choice = validateClassChoice(schedule, className, classStartLocal);
   if (!choice.ok) return { ok: false, status: 400, body: { error: choice.error } };
 
-  // Date guard: today or up to MAX_PAST_DAYS back, never the future.
+  // Date guard: today or up to the method's limit back, never the future.
+  const limits = backdateFromEnv(env);
+  const maxPastDays = method === 'staff' ? limits.staff : limits.kiosk;
   if (choice.date > todayLocal) return { ok: false, status: 400, body: { error: 'class date is in the future' } };
-  const oldest = new Date(`${todayLocal}T00:00:00Z`);
-  oldest.setUTCDate(oldest.getUTCDate() - MAX_PAST_DAYS);
-  if (choice.date < oldest.toISOString().slice(0, 10)) {
-    return { ok: false, status: 400, body: { error: 'class date is too far in the past' } };
+  if (choice.date < shiftDate(todayLocal, -maxPastDays)) {
+    return { ok: false, status: 400, body: { error: `class date is more than ${maxPastDays} days ago` } };
   }
 
-  // Actual tap time: trust clientTs when sane, else server time.
+  // Actual tap time: trust clientTs when sane, else server time. The floor is
+  // the kiosk's queue lifetime whichever route this is — a staff backfill of
+  // an old class is still recorded as tapped today, which is the truth.
   let checkedInAt = now;
   const ts = isoOrNull(clientTs);
-  if (ts && ts.getTime() <= now.getTime() + MAX_TS_SKEW_MS && ts.getTime() >= now.getTime() - (MAX_PAST_DAYS + 1) * 86_400_000) {
+  const tsFloor = now.getTime() - (limits.kiosk + 1) * 86_400_000;
+  if (ts && ts.getTime() <= now.getTime() + MAX_TS_SKEW_MS && ts.getTime() >= tsFloor) {
     checkedInAt = ts;
   }
 
