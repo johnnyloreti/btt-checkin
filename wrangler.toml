@@ -6,7 +6,7 @@ compatibility_date = "2026-08-01"
 [[d1_databases]]
 binding = "DB"
 database_name = "btt-checkin"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "d5c7a102-f226-4ebe-b4b8-78ac6fcbd71a"
 
 [vars]
 GHL_LOCATION_ID = "ARCSFhJ0JlkcuzfZtyEJ"
