@@ -368,6 +368,10 @@
   setInterval(refreshCurrentClass, CLASS_REFRESH_MS);
   setInterval(drainQueue, RETRY_MS);
   window.addEventListener('online', drainQueue);
+  // iOS suspends timers while Safari is backgrounded or the iPad sleeps, so
+  // the 30 s retry above stops running. Drain on the way back to the front.
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) drainQueue(); });
+  window.addEventListener('pageshow', drainQueue);
   input.focus();
 </script>
 </body>

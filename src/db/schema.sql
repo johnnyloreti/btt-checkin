@@ -41,3 +41,17 @@ CREATE TABLE IF NOT EXISTS pending_rollups (
   ghl_contact_id TEXT PRIMARY KEY,
   queued_at      TEXT NOT NULL
 );
+
+-- Stripe and belt awards (§15.2). Eligibility counts attended classes since
+-- the most recent row here.
+CREATE TABLE IF NOT EXISTS promotions (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  ghl_contact_id TEXT NOT NULL,
+  kind           TEXT NOT NULL CHECK (kind IN ('stripe','belt')),
+  awarded_on     TEXT NOT NULL,              -- "YYYY-MM-DD" ET
+  at_class_count INTEGER NOT NULL,           -- attended classes at that moment
+  note           TEXT,
+  created_at     TEXT NOT NULL               -- ISO UTC
+);
+
+CREATE INDEX IF NOT EXISTS idx_promotions_contact ON promotions (ghl_contact_id, created_at);

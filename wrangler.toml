@@ -21,6 +21,11 @@ MEMBER_TAG_PREFIXES = "foundations-"
 CHECKIN_EARLY_MIN = "180"
 CHECKIN_LATE_MIN = "180"
 
+# Stripe tab (§15.2). Classes between stripes, and which programs it covers.
+# An empty STRIPE_PROGRAMS turns the tab off. Adults added when Johnny says so.
+STRIPE_CLASSES = "7"
+STRIPE_PROGRAMS = "kids-3-5,kids-6-9,kids-10-14"
+
 WAIVER_TAG = "waiver-signed"
 WAIVER_FIELD = "checkin_last_at"
 
