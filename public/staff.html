@@ -62,6 +62,9 @@
   .overlay { position: fixed; inset: 0; background: var(--bg); z-index: 5; display: none; flex-direction: column; padding: 18px; overflow-y: auto; }
   .overlay.active { display: flex; }
   .overlay .top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .picklabel { display: block; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 10px 0 8px; }
+  input[type="date"].search { -webkit-appearance: none; appearance: none; min-height: 58px; }
+  input[type="date"].search::-webkit-date-and-time-value { text-align: left; }
   .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--gold); color: #1a1607; font-weight: 600; padding: 12px 18px; border-radius: 12px; display: none; z-index: 9; }
   .toast.active { display: block; }
 </style>
@@ -112,6 +115,7 @@
     <button class="back" id="member-back" type="button">&#8249; Back to members</button>
     <h2 id="member-title"></h2>
     <div id="member-facts" class="facts"></div>
+    <button class="btn" id="member-add-class" type="button">+ Add a class</button>
     <h2 style="font-size:22px">Stripes and belts</h2>
     <div id="member-promotions" class="list"></div>
     <h2 style="font-size:22px">Last 30 days</h2>
@@ -128,6 +132,17 @@
   <div id="add-tiles" class="tiles"></div>
 </div>
 
+<div id="pick-overlay" class="overlay">
+  <div class="top">
+    <h2 id="pick-title" style="margin:0"></h2>
+    <button class="back" id="pick-close" type="button">Close</button>
+  </div>
+  <label class="picklabel" for="pick-date">Which day</label>
+  <input id="pick-date" class="search" type="date">
+  <p class="note" id="pick-note" style="margin:14px 0 0"></p>
+  <div id="pick-list" class="list" style="margin-top:14px"></div>
+</div>
+
 <div id="toast" class="toast"></div>
 
 <script type="module">
@@ -138,6 +153,7 @@
   let tz = 'America/New_York';
   let date = null;          // "YYYY-MM-DD" being viewed
   let current = null;       // { name, startLocal } of the open class
+  let picking = null;       // the member whose Add a class overlay is open
   let roster = [];
   let rosterAt = 0;
 
@@ -390,6 +406,13 @@
     fact('Roster synced', d.syncedAt ? `${fmtDate(d.syncedAt.slice(0, 10))} ${fmtClock(d.syncedAt)}` : 'never');
     fact('GHL rollup', d.rollupPending ? 'Pending tonight' : 'Up to date');
     renderPromotions(d, m);
+    picking = {
+      m,
+      first: d.first,
+      programs: Array.isArray(d.programs) ? d.programs : [],
+      // Classes they are already on, so the picker can say so before the tap.
+      attended: new Set(d.last30.filter((r) => r.status === 'attended').map((r) => r.classStartLocal)),
+    };
     const list = $('member-history');
     list.innerHTML = '';
     if (d.last30.length === 0) list.appendChild(el('div', 'empty', 'No check-ins in the last 30 days'));
@@ -440,6 +463,74 @@
     });
   }
   $('member-back').addEventListener('click', () => showView('members'));
+
+  // ---------- add a class, starting from the member (§3) ----------
+  // The class roster route is the way in when a whole class was missed. This
+  // is the way in when one person was: pick the day, see only their classes.
+  $('member-add-class').addEventListener('click', async () => {
+    if (!picking) return;
+    $('pick-title').textContent = `Add a class for ${picking.first}`;
+    $('pick-note').textContent = '';
+    $('pick-list').innerHTML = '';
+    $('pick-overlay').classList.add('active');
+    await loadPick(null);
+  });
+  $('pick-close').addEventListener('click', () => $('pick-overlay').classList.remove('active'));
+  $('pick-date').addEventListener('change', () => loadPick($('pick-date').value));
+
+  async function loadPick(day) {
+    const list = $('pick-list');
+    list.innerHTML = '';
+    $('pick-note').textContent = '';
+    let data;
+    try {
+      data = await api(`/api/staff/today${day ? `?date=${encodeURIComponent(day)}` : ''}`);
+    } catch (e) {
+      list.appendChild(el('div', 'empty', `Could not load that day: ${e.message}`));
+      return;
+    }
+    if (!day) {
+      // The first load is dateless, so this is today. Bound the picker by how
+      // far back the server will accept a staff add.
+      const reach = Number(data.staffBackdateDays);
+      $('pick-date').max = data.date;
+      $('pick-date').min = shiftDate(data.date, -(Number.isFinite(reach) && reach >= 0 ? reach : 30));
+    }
+    $('pick-date').value = data.date;
+
+    const scheduled = data.classes.filter((c) => c.start);
+    const mine = scheduled.filter((c) => picking.programs.includes(c.program));
+    const shown = mine.length ? mine : scheduled;
+    if (scheduled.length === 0) $('pick-note').textContent = 'No classes that day.';
+    else if (mine.length === 0) $('pick-note').textContent = `Nothing in ${picking.first}'s program that day. All classes are listed.`;
+
+    for (const c of shown) {
+      const b = el('button', 'row');
+      b.type = 'button';
+      b.append(el('span', 'time', formatTime(c.start)), el('span', 'name', c.name));
+      if (picking.attended.has(c.startLocal)) b.appendChild(el('span', 'tag', 'already on'));
+      else if (c.count) b.appendChild(el('span', 'count', String(c.count)));
+      b.addEventListener('click', () => addClass(c.name, c.startLocal));
+      list.appendChild(b);
+    }
+    const open = el('button', 'row');
+    open.type = 'button';
+    open.append(el('span', 'time', ''), el('span', 'name', 'Open mat'));
+    open.addEventListener('click', () => addClass(UNSCHEDULED, `${data.date}T00:00`));
+    list.appendChild(open);
+  }
+
+  async function addClass(name, startLocal) {
+    const m = picking.m;
+    try {
+      const r = await post('/api/staff/add', { contactId: m.id, className: name, classStartLocal: startLocal });
+      toast(r.duplicate ? `${picking.first} was already on the list` : `Added ${picking.first}`);
+      $('pick-overlay').classList.remove('active');
+      await openMember(m);
+    } catch (e) {
+      toast(`Could not add: ${e.message}`);
+    }
+  }
 
   // ---------- nav ----------
   for (const t of document.querySelectorAll('.tab[data-tab]')) {

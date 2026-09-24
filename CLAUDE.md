@@ -129,9 +129,11 @@ Kids 6-9  11:00 AM
 
 **Add student** opens the same search as the kiosk and records attendance with `method = "staff"`. Tonight's date bar goes back, so a class nobody tapped for can be filled in later: a staff add reaches back `STAFF_BACKDATE_DAYS` (30) where the kiosk reaches back `KIOSK_BACKDATE_DAYS` (3). (Split by Johnny, 2026-09-24; both were 3.) The row lands on the class it names, so `attendance_last`, `attendance_30d` and `attendance_week` all come out on the right date. `checked_in_at` stays the staff tap, which is the truth.
 
-**Member lookup** (search any member): last 30 days of attendance, lifetime count, sync status. Read-only in V1.
+**Member lookup** (search any member): last 30 days of attendance, lifetime count, sync status, and promotion history (§15.2). It was read-only in V1; two things write from it now, recording a stripe and Add a class.
 
-No belt tracking, no notes, no promotions, no billing in V1. Those are V2.
+**Add a class** (on the member screen, added 2026-09-24) is the way in when one person was missed rather than a whole class: three taps instead of walking the date bar back and opening the class. Pick the day (the picker is bounded by `STAFF_BACKDATE_DAYS`, so it never offers a day the server would refuse), see only that member's classes for it, tap one. A class they are already on is marked, and tapping it anyway is a harmless duplicate. Open mat is always offered. If nothing in their program runs that day, that day's other classes are listed rather than none, because staff know better than the program tag does.
+
+No belt tracking, no notes, no billing in V1. Promotions since arrived as an approved V2 item (§15.2).
 
 ---
 

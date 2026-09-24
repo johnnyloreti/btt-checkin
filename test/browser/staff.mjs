@@ -60,7 +60,17 @@ page.on('pageerror', (e) => errors.push(String(e)));
 await page.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
 let failures = 0;
 async function step(name, fn) {
-  try { await fn(); console.log(`ok   ${name}`); } catch (e) { failures += 1; console.log(`FAIL ${name}\n     ${e.message.split('\n')[0]}`); }
+  try {
+    await fn();
+    console.log(`ok   ${name}`);
+  } catch (e) {
+    failures += 1;
+    // Keep Playwright's call-log line: the first line alone never names the
+    // selector it gave up on, which makes a timeout here impossible to read.
+    const lines = e.message.split('\n');
+    const waiting = lines.find((l) => /waiting for|locator\(/.test(l));
+    console.log(`FAIL ${name}\n     ${lines[0]}${waiting ? `\n     ${waiting.trim()}` : ''}`);
+  }
 }
 
 await step('/staff shows the login page and rejects a wrong PIN', async () => {
@@ -193,6 +203,70 @@ await step('the award shows on the member screen and undo removes it', async () 
   await page.click('#member-promotions .undo');
   await page.waitForFunction(() => /No stripes or belts recorded/.test(document.getElementById('member-promotions').textContent));
   assert.equal(env.DB.raw.prepare('SELECT COUNT(*) AS n FROM promotions').get().n, 0);
+});
+
+await step('add a class from the member screen: pick a day, see only their classes', async () => {
+  await page.click('.tab[data-tab="members"]');
+  await page.fill('#member-search', 'emma');
+  await page.waitForSelector('#member-tiles .tile');
+  await page.click('#member-tiles .tile:has-text("Emma Jones")');
+  await page.waitForSelector('#member.active');
+
+  await page.click('#member-add-class');
+  await page.waitForSelector('#pick-overlay.active');
+  await page.waitForSelector('#pick-list .row');
+  assert.match(await page.locator('#pick-title').textContent(), /Add a class for Emma/);
+  // Emma is Kids 6-9. Saturday runs four classes; she is offered hers, plus open mat.
+  assert.deepEqual(await page.locator('#pick-list .row .name').allTextContents(), ['Kids 6-9', 'Open mat']);
+  const first = await page.locator('#pick-list .row').first().textContent();
+  assert.match(first, /11:00 AM/);
+  assert.match(first, /already on/, 'she was added to this class earlier in the run');
+  assert.equal(await page.locator('#pick-date').inputValue(), '2026-09-05');
+  assert.equal(await page.locator('#pick-date').getAttribute('max'), '2026-09-05');
+  assert.equal(await page.locator('#pick-date').getAttribute('min'), '2026-08-06', 'thirty days of reach');
+  await page.screenshot({ path: join(OUT, 'staff-add-class.png') });
+});
+
+await step('a past day backfills onto that day, not today', async () => {
+  await page.fill('#pick-date', '2026-08-20'); // Thursday, a fortnight back
+  await page.waitForFunction(() => /4:30 PM/.test(document.getElementById('pick-list').textContent));
+  assert.deepEqual(await page.locator('#pick-list .row .name').allTextContents(), ['Kids 6-9', 'Open mat']);
+
+  await page.click('#pick-list .row:has-text("Kids 6-9")');
+  await page.waitForFunction(() => /Added Emma/.test(document.getElementById('toast').textContent));
+  await page.waitForSelector('#pick-overlay', { state: 'hidden' });
+  // The row lands on the class it names, so the rollup dates come out right.
+  const row = env.DB.raw
+    .prepare("SELECT class_start_local, method FROM attendance WHERE ghl_contact_id = 'c_emma' AND class_start_local LIKE '2026-08-20%'")
+    .get();
+  assert.equal(row.class_start_local, '2026-08-20T16:30');
+  assert.equal(row.method, 'staff');
+  assert.match(await page.locator('#member-history').textContent(), /Kids 6-9 4:30 PM/);
+  assert.match(await page.locator('#member-facts').textContent(), /Class #2/);
+});
+
+await step('a member with no class that day is still offered the others', async () => {
+  await page.click('.tab[data-tab="members"]');
+  await page.fill('#member-search', 'nora');
+  await page.waitForSelector('#member-tiles .tile');
+  await page.click('#member-tiles .tile:has-text("Nora Newkid")');
+  await page.waitForSelector('#member.active');
+  await page.click('#member-add-class');
+  await page.waitForSelector('#pick-list .row');
+
+  // Nora is Kids 3-5, which does not run on a Wednesday. The other three show.
+  await page.fill('#pick-date', '2026-08-19');
+  await page.waitForFunction(() => /All classes are listed/.test(document.getElementById('pick-note').textContent));
+  assert.match(await page.locator('#pick-note').textContent(), /Nothing in Nora's program that day/);
+  assert.deepEqual(await page.locator('#pick-list .row .name').allTextContents(), ['Kids 6-9', 'Kids 10-14', 'Adult No-Gi', 'Open mat']);
+
+  // Friday runs nothing at all. Open mat is still there.
+  await page.fill('#pick-date', '2026-08-21');
+  await page.waitForFunction(() => /No classes that day/.test(document.getElementById('pick-note').textContent));
+  assert.deepEqual(await page.locator('#pick-list .row .name').allTextContents(), ['Open mat']);
+
+  await page.click('#pick-close');
+  await page.waitForSelector('#pick-overlay', { state: 'hidden' });
 });
 
 await step('sign out returns to the login page', async () => {

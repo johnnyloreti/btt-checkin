@@ -91,6 +91,9 @@ test('today: every class on the date with attended counts, open mat only when us
   assert.equal(t.date, '2026-09-05');
   assert.equal(t.weekday, 'Sat');
   assert.equal(t.timezone, 'America/New_York');
+  // Bounds the date picker behind Add a class, so the page never offers a day
+  // the server would refuse.
+  assert.equal(t.staffBackdateDays, 30);
   assert.deepEqual(t.classes.map((c) => [c.name, c.start, c.count]), [
     ['Kids 3-5', '10:30', 0],
     ['Kids 6-9', '11:00', 2],

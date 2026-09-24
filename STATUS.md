@@ -171,7 +171,9 @@ wrangler d1 execute btt-checkin --remote --command "SELECT ran_at, job, outcome,
 - The staff page has a Sync roster now button. The rollup runs nightly at 03:00 ET or on demand with the command above.
 - To change the schedule, edit `schedule.json`, run `npm test`, commit, push, `wrangler deploy`.
 - A failed check-in on the iPad is queued and retried every 30 seconds. A small line at the bottom of the kiosk shows how many are waiting.
-- **To fill in a class nobody tapped for:** open `/staff`, walk the date bar back to that day, tap the class, then Add student for each person. It reaches back thirty days. The record lands on that class, not today, so last-attended and the 30-day and week counts all come out right in GHL on the next nightly rollup.
+- **To fill in a class nobody tapped for:** open `/staff`, walk the date bar back to that day, tap the class, then Add student for each person.
+- **To fill in one person:** Members, search them, open them, **Add a class**. Pick the day and tap the class. Only their classes are listed, and one they are already on says so.
+- Either way it reaches back thirty days, and the record lands on the class you picked, not on today, so last-attended and the 30-day and week counts all come out right in GHL on the next nightly rollup.
 
 ## Local development
 
@@ -217,4 +219,4 @@ Cloudflare, replace all of this with a Custom Domain on the Worker.
 
 ## Not built (V2, per §10 and §13)
 
-Belt tracking, promotions, family view, member portal, QR codes, GHL calendar sync, notes, billing of any kind. `schedule.json` stays the source of truth for classes until V1.1 replaces it with the GHL calendar sync.
+Family view, member portal, QR codes, GHL calendar sync, notes, billing of any kind. (Stripes and belts came in as an approved V2 item, §15.2, and are built.) `schedule.json` stays the source of truth for classes until V1.1 replaces it with the GHL calendar sync.

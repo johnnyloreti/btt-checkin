@@ -4,6 +4,7 @@
 import { classesOn, UNSCHEDULED_CLASS, START_LOCAL_RE, shiftDate } from './classes.js';
 import { localParts } from './time.js';
 import { hasWaiverColumn } from './schema-caps.js';
+import { backdateFromEnv } from './checkin.js';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -33,7 +34,9 @@ export async function today(env, schedule, date) {
   if (openMat > 0) {
     out.push({ name: UNSCHEDULED_CLASS, program: null, programLabel: '', start: null, startLocal: `${date}T00:00`, minutes: 0, count: openMat });
   }
-  return { date, weekday: weekdayLabel(date), timezone: schedule.timezone, classes: out };
+  // staffBackdateDays bounds the date picker on the member screen, so the
+  // page never offers a day the server would refuse.
+  return { date, weekday: weekdayLabel(date), timezone: schedule.timezone, classes: out, staffBackdateDays: backdateFromEnv(env).staff };
 }
 
 function weekdayLabel(date) {
