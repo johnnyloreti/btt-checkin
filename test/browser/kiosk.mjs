@@ -40,7 +40,11 @@ const CURRENT = {
   ],
 };
 
-const state = { failCheckins: false, checkins: [], seen: new Set() };
+const state = { failCheckins: false, checkins: [], seen: new Set(), purchases: [], links: [], pins: { cccccccccccccccccccc: '1234' }, failPurchases: false, locked: new Set() };
+const TAB_ITEMS = [{ key: 'water', label: 'Water', amountCents: 100, price: '$1' }, { key: 'hydration', label: 'Hydration', amountCents: 300, price: '$3' }];
+// Adults may buy (María has a PIN, Jake does not); kids never see the row.
+const ADULTS = new Set(['cccccccccccccccccccc', '33333333333333333333']);
+const readBody = (req) => new Promise((resolve) => { let b = ''; req.on('data', (d) => { b += d; }); req.on('end', () => resolve(JSON.parse(b || '{}'))); });
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.png': 'image/png' };
 
 const server = http.createServer((req, res) => {
@@ -59,7 +63,30 @@ const server = http.createServer((req, res) => {
       const duplicate = state.seen.has(key);
       state.seen.add(key);
       const count = [...state.seen].filter((k) => k.startsWith(rec.contactId)).length;
-      send(200, { ok: true, duplicate, className: rec.className, classStartLocal: rec.classStartLocal, classCount: count, classCountLabel: `Class #${count}`, waiverNeeded: rec.contactId === 'ffffffffffffffffffff' });
+      const out = { ok: true, duplicate, className: rec.className, classStartLocal: rec.classStartLocal, classCount: count, classCountLabel: `Class #${count}`, waiverNeeded: rec.contactId === 'ffffffffffffffffffff' };
+      if (ADULTS.has(rec.contactId)) out.tab = { items: TAB_ITEMS, hasPin: Boolean(state.pins[rec.contactId]), locked: state.locked.has(rec.contactId) };
+      send(200, out);
+    });
+    return;
+  }
+  if (url.pathname === '/api/tab/purchase' && req.method === 'POST') {
+    readBody(req).then((b) => {
+      if (state.failPurchases) return send(500, { error: 'boom' });
+      if (!ADULTS.has(b.contactId)) return send(403, { reason: 'not_eligible' });
+      if (state.locked.has(b.contactId)) return send(423, { ok: false, reason: 'locked' });
+      if (!state.pins[b.contactId]) return send(409, { ok: false, reason: 'no_pin' });
+      if (state.pins[b.contactId] !== b.pin) return send(401, { ok: false, reason: 'wrong' });
+      const item = TAB_ITEMS.find((i) => i.key === b.item);
+      state.purchases.push(b);
+      send(200, { ok: true, item: item.key, label: item.label, amountCents: item.amountCents, message: `Added to your tab. ${item.label}, ${item.price}.` });
+    });
+    return;
+  }
+  if (url.pathname === '/api/tab/pin-link' && req.method === 'POST') {
+    readBody(req).then((b) => {
+      const sent = !state.links.includes(b.contactId);
+      state.links.push(b.contactId);
+      send(200, { ok: true, sent, reason: sent ? undefined : 'recent' });
     });
     return;
   }
@@ -186,6 +213,116 @@ await step('waiver missing: success screen adds the prompt and holds longer', as
   await page.click('#checkin');
   await page.waitForSelector('#success.active');
   assert.equal(await page.locator('#waiver').isVisible(), false);
+  await page.waitForSelector('#home.active', { timeout: 5000 });
+});
+
+await step('drink tab: an adult with a PIN sees the row, types the PIN, the drink lands on the tab', async () => {
+  await page.fill('#name-input', 'nun');
+  await page.click('.tile:has-text("María Núñez")');
+  await page.waitForSelector('#checkin-anyway');
+  await page.click('#checkin-anyway');
+  await page.waitForSelector('#success.active');
+  await page.waitForSelector('#tab.active');
+  assert.deepEqual(await page.locator('.drink .n').allTextContents(), ['Water', 'Hydration']);
+  assert.deepEqual(await page.locator('.drink .p').allTextContents(), ['$1', '$3']);
+  assert.match(await page.locator('#tab-note').textContent(), /Charged to your card on file/);
+  await page.screenshot({ path: join(OUT, 'ipad-drinks.png') });
+
+  await page.click('.drink[data-item="water"]');
+  await page.waitForSelector('#pad.active');
+  assert.match(await page.locator('#pad-sub').textContent(), /Water, \$1/);
+  await page.screenshot({ path: join(OUT, 'ipad-pin-pad.png') });
+  // A wrong PIN says so and stays on the pad.
+  for (const k of ['0', '0', '0', '0']) await page.click(`.key[data-key="${k}"]`);
+  await page.waitForFunction(() => /didn't match/.test(document.getElementById('pad-msg').textContent));
+  assert.equal(await page.locator('#pad.active').count(), 1);
+  assert.equal(await page.locator('.dot.on').count(), 0, 'dots cleared for another try');
+  // The right one.
+  for (const k of ['1', '2', '3', '4']) await page.click(`.key[data-key="${k}"]`);
+  await page.waitForFunction(() => /Added to your tab\. Water, \$1\./.test(document.getElementById('tab-msg').textContent));
+  assert.equal(await page.locator('#pad.active').count(), 0);
+  assert.equal(await page.locator('.drink').count(), 0, 'one drink per check-in screen');
+  assert.equal(state.purchases.length, 1);
+  assert.equal(state.purchases[0].item, 'water');
+  assert.equal(state.purchases[0].pin, '1234');
+  assert.equal(state.purchases[0].contactId, 'cccccccccccccccccccc');
+  await page.screenshot({ path: join(OUT, 'ipad-drink-added.png') });
+  // The screen held past the normal 3 seconds, then goes home.
+  await page.waitForSelector('#home.active', { timeout: 12000 });
+});
+await step('drink tab: a kid never sees the row', async () => {
+  await page.fill('#name-input', 'jack');
+  await page.click('.tile:has-text("Jack Silva")');
+  await page.click('#checkin');
+  await page.waitForSelector('#success.active');
+  assert.equal(await page.locator('#tab.active').count(), 0);
+  await page.waitForSelector('#home.active', { timeout: 5000 });
+});
+await step('drink tab: no PIN yet offers a setup link, once', async () => {
+  await page.fill('#name-input', 'jake');
+  await page.click('.tile:has-text("Jake Miller")');
+  await page.waitForSelector('#checkin-anyway');
+  await page.click('#checkin-anyway');
+  await page.waitForSelector('#pin-link');
+  assert.equal(await page.locator('.drink').count(), 0);
+  assert.match(await page.locator('#tab-setup').textContent(), /Set up your purchase PIN/);
+  await page.screenshot({ path: join(OUT, 'ipad-pin-setup.png') });
+  await page.click('#pin-link');
+  await page.waitForFunction(() => /Check your texts for a link/.test(document.getElementById('tab-msg').textContent));
+  assert.deepEqual(state.links, ['33333333333333333333']);
+  await page.waitForSelector('#home.active', { timeout: 12000 });
+  // Straight away again: not resent, and it says so.
+  await page.fill('#name-input', 'jake');
+  await page.click('.tile:has-text("Jake Miller")');
+  await page.waitForSelector('#checkin-anyway');
+  await page.click('#checkin-anyway');
+  await page.waitForSelector('#pin-link');
+  await page.click('#pin-link');
+  await page.waitForFunction(() => /We just sent one/.test(document.getElementById('tab-msg').textContent));
+  await page.waitForSelector('#home.active', { timeout: 12000 });
+});
+await step('drink tab: a failed purchase says so and nothing is queued', async () => {
+  state.failPurchases = true;
+  const before = state.purchases.length;
+  await page.fill('#name-input', 'nun');
+  await page.click('.tile:has-text("María Núñez")');
+  await page.waitForSelector('#checkin-anyway');
+  await page.click('#checkin-anyway');
+  await page.waitForSelector('.drink[data-item="hydration"]');
+  await page.click('.drink[data-item="hydration"]');
+  await page.waitForSelector('#pad.active');
+  for (const k of ['1', '2', '3', '4']) await page.click(`.key[data-key="${k}"]`);
+  await page.waitForFunction(() => /didn't go through\. Nothing was added to your tab\./.test(document.getElementById('tab-msg').textContent));
+  assert.equal(state.purchases.length, before);
+  const queued = await page.evaluate(() => JSON.parse(localStorage.getItem('btt.checkin.queue') || '[]'));
+  assert.equal(queued.length, 0, 'purchases are never queued');
+  state.failPurchases = false;
+  await page.waitForSelector('#home.active', { timeout: 12000 });
+});
+await step('drink tab: Cancel on the pad, and the locked state', async () => {
+  await page.fill('#name-input', 'nun');
+  await page.click('.tile:has-text("María Núñez")');
+  await page.waitForSelector('#checkin-anyway');
+  await page.click('#checkin-anyway');
+  await page.waitForSelector('.drink[data-item="water"]');
+  await page.click('.drink[data-item="water"]');
+  await page.waitForSelector('#pad.active');
+  await page.click('.key[data-key="1"]');
+  await page.click('.key[data-key="Delete"]');
+  assert.equal(await page.locator('.dot.on').count(), 0);
+  await page.click('.key[data-key="Cancel"]');
+  assert.equal(await page.locator('#pad.active').count(), 0);
+  await page.waitForSelector('#home.active', { timeout: 12000 });
+
+  state.locked.add('cccccccccccccccccccc');
+  await page.fill('#name-input', 'nun');
+  await page.click('.tile:has-text("María Núñez")');
+  await page.waitForSelector('#checkin-anyway');
+  await page.click('#checkin-anyway');
+  await page.waitForSelector('#tab.active');
+  assert.equal(await page.locator('.drink').count(), 0);
+  assert.match(await page.locator('#tab-msg').textContent(), /Purchases are paused for this account/);
+  state.locked.delete('cccccccccccccccccccc');
   await page.waitForSelector('#home.active', { timeout: 5000 });
 });
 

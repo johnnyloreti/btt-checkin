@@ -56,6 +56,29 @@
   .waiver.active { display: block; }
   .waiver p { font-size: 22px; margin: 0 0 16px; }
   .waiver img { width: 220px; height: 220px; border-radius: 12px; background: var(--bone); padding: 10px; }
+  .tab { display: none; margin-top: 30px; padding-top: 24px; border-top: 1px solid var(--line); width: 100%; max-width: 520px; }
+  .tab.active { display: block; }
+  .tab .note { color: var(--muted); font-size: 18px; margin: 0 0 14px; }
+  .drinks { display: flex; gap: 14px; justify-content: center; }
+  .drink { flex: 1; font-family: var(--body); background: var(--tile); border: 2px solid var(--line); border-radius: 18px; padding: 18px; color: var(--bone); cursor: pointer; }
+  .drink:active { border-color: var(--gold); }
+  .drink .n { font-size: 26px; font-weight: 600; }
+  .drink .p { color: var(--gold); font-size: 20px; margin-top: 4px; }
+  .tab-msg { font-size: 22px; margin-top: 16px; min-height: 28px; }
+  .setup p { font-size: 22px; margin: 0 0 12px; }
+  .setup .btn.secondary { font-size: 24px; padding: 18px; }
+  .pad { position: fixed; inset: 0; background: rgba(9, 9, 10, 0.96); display: none; flex-direction: column; align-items: center; justify-content: center; z-index: 5; padding: 24px; }
+  .pad.active { display: flex; }
+  .pad h3 { font-family: var(--display); font-weight: 500; font-size: 34px; margin: 0 0 6px; }
+  .pad .sub { color: var(--gold); font-size: 20px; margin: 0 0 22px; }
+  .dots { display: flex; gap: 18px; margin-bottom: 26px; }
+  .dot { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--bone); }
+  .dot.on { background: var(--gold); border-color: var(--gold); }
+  .keys { display: grid; grid-template-columns: repeat(3, 92px); gap: 14px; }
+  .key { font-family: var(--body); font-size: 32px; font-weight: 500; width: 92px; height: 76px; border-radius: 16px; border: 2px solid var(--line); background: var(--tile); color: var(--bone); cursor: pointer; }
+  .key:active { border-color: var(--gold); }
+  .key.quiet { background: none; border-color: transparent; color: var(--muted); font-size: 17px; }
+  .pad .msg { min-height: 28px; color: var(--gold); font-size: 20px; margin-top: 18px; text-align: center; }
   .status { position: fixed; bottom: 10px; left: 0; right: 0; text-align: center; font-size: 13px; color: var(--muted); }
   @media (max-width: 480px) {
     h1 { font-size: 42px; }
@@ -95,7 +118,21 @@
     <p>One thing before class: sign the waiver</p>
     <img id="waiver-qr" src="/waiver-qr.png" alt="Waiver QR code" onerror="this.style.display='none'">
   </div>
+  <div id="tab" class="tab">
+    <p id="tab-note" class="note">Charged to your card on file.</p>
+    <div id="drinks" class="drinks"></div>
+    <div id="tab-setup" class="setup"></div>
+    <p id="tab-msg" class="tab-msg"></p>
+  </div>
 </section>
+
+<div id="pad" class="pad">
+  <h3>Your purchase PIN</h3>
+  <p id="pad-sub" class="sub"></p>
+  <div id="dots" class="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+  <div id="keys" class="keys"></div>
+  <p id="pad-msg" class="msg"></p>
+</div>
 
 <div id="status" class="status"></div>
 
@@ -105,6 +142,8 @@
   const IDLE_MS = 60_000;
   const SUCCESS_MS = 3_000;
   const SUCCESS_WAIVER_MS = 12_000;
+  const SUCCESS_TAB_MS = 45_000;   // holding the screen while a PIN is typed
+  const SUCCESS_AFTER_TAB_MS = 7_000;
   const ROSTER_REFRESH_MS = 10 * 60_000;
   const CLASS_REFRESH_MS = 60_000;
   const RETRY_MS = 30_000;
@@ -139,6 +178,8 @@
   }
   function goHome() {
     clearTimeout(successTimer);
+    closePad();
+    successMember = null;
     selected = null;
     input.value = '';
     tiles.innerHTML = '';
@@ -303,7 +344,7 @@
       enqueue(record);
     }
     submitting = false;
-    showSuccess(cls.label, result);
+    showSuccess(cls.label, result, member);
   }
   async function post(record) {
     const ctl = new AbortController();
@@ -322,14 +363,168 @@
       clearTimeout(t);
     }
   }
-  function showSuccess(label, result) {
+  function showSuccess(label, result, member) {
     $('success-class').textContent = label;
     $('success-count').textContent = result && result.classCountLabel ? result.classCountLabel : '';
     const waiver = Boolean(result && result.waiverNeeded);
     $('waiver').classList.toggle('active', waiver);
+    successMember = member || null;
+    renderTab(result && result.tab ? result.tab : null);
     show('success');
+    holdSuccess(waiver ? SUCCESS_WAIVER_MS : SUCCESS_MS);
+  }
+  function holdSuccess(ms) {
     clearTimeout(successTimer);
-    successTimer = setTimeout(goHome, waiver ? SUCCESS_WAIVER_MS : SUCCESS_MS);
+    successTimer = setTimeout(goHome, ms);
+  }
+
+  // ---------- drink tab (brief section 15.3) ----------
+  // Shown only when the server said this member may buy, on a check-in that
+  // reached it. Online only: a purchase is never queued, and a failure says so.
+  let successMember = null;
+  let padItem = null;
+  let padDigits = '';
+  const LOCKED_COPY = 'Purchases are paused for this account. Ask at the desk.';
+  const FAILED_COPY = "That didn't go through. Nothing was added to your tab.";
+
+  function renderTab(tab) {
+    const box = $('tab');
+    $('drinks').innerHTML = '';
+    $('tab-setup').innerHTML = '';
+    $('tab-msg').textContent = '';
+    box.classList.toggle('active', Boolean(tab));
+    if (!tab) return;
+    $('tab-note').style.display = tab.hasPin && !tab.locked ? '' : 'none';
+    if (tab.locked) { $('tab-msg').textContent = LOCKED_COPY; return; }
+    if (!tab.hasPin) { renderSetup(); return; }
+    for (const it of tab.items) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'drink';
+      b.dataset.item = it.key;
+      const n = document.createElement('div');
+      n.className = 'n';
+      n.textContent = it.label;
+      const p = document.createElement('div');
+      p.className = 'p';
+      p.textContent = it.price;
+      b.append(n, p);
+      b.addEventListener('click', () => openPad(it));
+      $('drinks').appendChild(b);
+    }
+  }
+  function renderSetup() {
+    const box = $('tab-setup');
+    box.innerHTML = '';
+    const line = document.createElement('p');
+    line.textContent = 'Set up your purchase PIN';
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'btn secondary';
+    b.id = 'pin-link';
+    b.textContent = 'Text me a setup link';
+    b.addEventListener('click', () => requestLink(b));
+    box.append(line, b);
+  }
+  async function requestLink(button) {
+    if (!successMember) return;
+    holdSuccess(SUCCESS_TAB_MS);
+    button.disabled = true;
+    let msg = 'We could not send that. Ask at the desk.';
+    try {
+      const res = await fetchJson('/api/tab/pin-link', { contactId: successMember.id });
+      if (res.ok && res.body.ok) msg = res.body.sent ? 'Check your texts for a link to set your PIN.' : 'We just sent one. Check your texts.';
+    } catch {
+      /* the message above */
+    }
+    $('tab-setup').innerHTML = '';
+    $('tab-msg').textContent = msg;
+    holdSuccess(SUCCESS_AFTER_TAB_MS);
+  }
+  async function fetchJson(path, body) {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), 6000);
+    try {
+      const res = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: ctl.signal });
+      const parsed = await res.json().catch(() => ({}));
+      return { ok: res.ok, status: res.status, body: parsed };
+    } finally {
+      clearTimeout(t);
+    }
+  }
+
+  // The PIN pad.
+  (function buildKeys() {
+    const keys = $('keys');
+    const add = (label, cls, onTap) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = `key${cls ? ` ${cls}` : ''}`;
+      b.dataset.key = label;
+      b.textContent = label;
+      b.addEventListener('click', onTap);
+      keys.appendChild(b);
+    };
+    for (const d of ['1', '2', '3', '4', '5', '6', '7', '8', '9']) add(d, '', () => padPress(d));
+    add('Cancel', 'quiet', () => { closePad(); holdSuccess(SUCCESS_AFTER_TAB_MS); });
+    add('0', '', () => padPress('0'));
+    add('Delete', 'quiet', () => { padDigits = padDigits.slice(0, -1); renderDots(); });
+  })();
+  function renderDots() {
+    $('dots').querySelectorAll('.dot').forEach((d, i) => d.classList.toggle('on', i < padDigits.length));
+  }
+  function openPad(item) {
+    padItem = item;
+    padDigits = '';
+    $('pad-sub').textContent = `${item.label}, ${item.price}`;
+    $('pad-msg').textContent = '';
+    renderDots();
+    $('pad').classList.add('active');
+    holdSuccess(SUCCESS_TAB_MS);
+  }
+  function closePad() {
+    $('pad').classList.remove('active');
+    padItem = null;
+    padDigits = '';
+  }
+  let purchasing = false;
+  function padPress(d) {
+    if (purchasing || padDigits.length >= 4) return;
+    padDigits += d;
+    renderDots();
+    $('pad-msg').textContent = '';
+    if (padDigits.length === 4) submitPurchase();
+  }
+  async function submitPurchase() {
+    if (!successMember || !padItem) return;
+    purchasing = true;
+    const item = padItem;
+    let outcome = { kind: 'failed' };
+    try {
+      const res = await fetchJson('/api/tab/purchase', { contactId: successMember.id, item: item.key, pin: padDigits });
+      if (res.ok && res.body.ok) outcome = { kind: 'added', message: res.body.message };
+      else if (res.status === 401) outcome = { kind: 'wrong' };
+      else if (res.status === 423) outcome = { kind: 'locked' };
+      else if (res.status === 409) outcome = { kind: 'no_pin' };
+    } catch {
+      /* failed */
+    }
+    purchasing = false;
+    if (outcome.kind === 'wrong') {
+      padDigits = '';
+      renderDots();
+      $('pad-msg').textContent = "That PIN didn't match.";
+      holdSuccess(SUCCESS_TAB_MS);
+      return;
+    }
+    closePad();
+    $('drinks').innerHTML = '';
+    $('tab-note').style.display = 'none';
+    if (outcome.kind === 'added') $('tab-msg').textContent = outcome.message || 'Added to your tab.';
+    else if (outcome.kind === 'locked') $('tab-msg').textContent = LOCKED_COPY;
+    else if (outcome.kind === 'no_pin') renderSetup();
+    else $('tab-msg').textContent = FAILED_COPY;
+    holdSuccess(SUCCESS_AFTER_TAB_MS);
   }
 
   // ---------- offline queue ----------

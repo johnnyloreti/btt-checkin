@@ -8,7 +8,9 @@ import { notifyWaiverCheckin, waiverEnabled, logWaiverFailure } from './waiver.j
 import { hasWaiverColumn, hasPromotionsTable, hasTabTables } from './schema-caps.js';
 import { tabConfig, canBuy } from './tab.js';
 import { createSetupToken, readSetupToken, completeSetup, clearLockout, pinActivity, writePinLink, requirePepper } from './pin.js';
-import { hasNoCardFlag } from './purchases.js';
+import { hasNoCardFlag, recordPurchase } from './purchases.js';
+import { verifyPin, pinStatus } from './pin.js';
+import { formatCents } from './tab.js';
 import { logSyncRow } from './synclog.js';
 import { getFieldIds } from './rollup.js';
 import { stripeCandidates, recordPromotion, undoLastPromotion, promotionHistory, stripesEnabled } from './promotions.js';
@@ -258,6 +260,19 @@ export function createApp(schedule, deps = defaultDeps(), opts = {}) {
     // §15.1: waiver missing. Tell the kiosk, and nudge GHL after the response goes out.
     const waiverNeeded = waiverEnabled(env) && Number(member.waiver ?? 1) === 0;
     const body2 = { ...result.body, waiverNeeded };
+    // §15.3: the drink row, only for a member who may buy, only on a check-in
+    // that reached the server. A queued check-in never shows it.
+    if (method === 'kiosk') {
+      const cfg = await tabReady(env);
+      if (cfg && (await buyer(env, cfg, member))) {
+        const pin = await pinStatus(env, member.ghl_contact_id, at);
+        body2.tab = {
+          items: cfg.items.map((i) => ({ key: i.key, label: i.label, amountCents: i.amountCents, price: formatCents(i.amountCents) })),
+          hasPin: pin.hasPin,
+          locked: pin.locked,
+        };
+      }
+    }
     if (waiverNeeded && !result.body.duplicate && deps.notifyWaiver) {
       const task = deps.notifyWaiver(env, member.ghl_contact_id, at).then(async (r) => {
         if (r.ok) return;
@@ -354,6 +369,25 @@ export function createApp(schedule, deps = defaultDeps(), opts = {}) {
               return json({ error: 'could not send the link' }, 502);
             }
             return json({ ok: true, sent: true });
+          }
+
+          // A drink on the tab. Online only: the kiosk never queues this.
+          if (method === 'POST' && path === '/api/tab/purchase') {
+            const body = await readJson(request);
+            if (!body) return json({ error: 'expected JSON body' }, 400);
+            const member = await resolveMember(env, body.contactId);
+            if (!member) return json({ error: 'unknown member' }, 404);
+            if (!(await buyer(env, cfg, member))) return json({ error: 'not eligible', reason: 'not_eligible' }, 403);
+            if (!cfg.items.some((i) => i.key === String(body.item || '').toLowerCase())) return json({ error: 'unknown item', reason: 'unknown_item' }, 400);
+            requirePepper(env);
+            const v = await verifyPin(env, member.ghl_contact_id, body.pin, at);
+            if (!v.ok) {
+              const status = v.reason === 'locked' ? 423 : v.reason === 'no_pin' ? 409 : v.reason === 'bad_format' ? 400 : 401;
+              return json({ ok: false, reason: v.reason, lockedUntil: v.lockedUntil || null }, status);
+            }
+            const r = await recordPurchase(env, cfg, { buyerId: member.ghl_contact_id, payerId: member.ghl_contact_id, itemKey: body.item, method: 'kiosk', now: at });
+            if (!r.ok) return json({ ok: false, reason: r.reason }, 400);
+            return json(r);
           }
 
           if (method === 'GET' && path === '/api/tab/pin-token') {
