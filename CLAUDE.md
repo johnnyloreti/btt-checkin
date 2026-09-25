@@ -95,8 +95,8 @@ Kids 6-9, 4:30 PM
 Class #37
 ```
 
-- Duplicate guard: same member, same class, same day = no second record, but still show the success screen. Never show an error to a student.
-- Billing, membership status, balances, holds: **never shown on the kiosk.** If a member is flagged inactive in GHL, the kiosk still checks them in and writes `status_at_checkin = "inactive"` on the record. Staff see it. The student doesn't.
+- Duplicate guard: same member, same class, same day = no second record, but still show the success screen. Never show an error to a student. (§15.3: this and the offline queue cover check-in only. A purchase is online-only and says so when it fails.)
+- Billing, membership status, balances, holds: **never shown on the kiosk.** If a member is flagged inactive in GHL, the kiosk still checks them in and writes `status_at_checkin = "inactive"` on the record. Staff see it. The student doesn't. (§15.3 adds one exception: the drink row and its prices. Never a balance or a tab total.)
 - 60 seconds idle on any screen returns to home.
 - The page caches the roster in memory after load and re-fetches every 10 minutes. If a POST fails, the check-in is queued in `localStorage` and retried every 30 seconds. The success screen shows regardless. Queued records carry their original timestamp.
 
@@ -243,7 +243,7 @@ Every check-in inserts into `pending_rollups` so the nightly job only touches co
 
 Johnny creates these five custom fields in GHL (Settings, Custom Fields, contact type). On first run, the Worker resolves field keys to IDs via `GET /locations/{id}/customFields` and caches them. If any of the five is missing, log `degraded` with the missing key and skip that field; never fail the whole push.
 
-**Allowed writes, exhaustively:** `PUT /contacts/{id}` with custom field values. That is the only write. Put a test in place that scans `src/` for any other method or endpoint and fails.
+**Allowed writes, exhaustively:** `PUT /contacts/{id}` with custom field values. That was the only write until §15.3 (2026-09-25), which adds the invoice-schedule calls listed there. The write scanner test is an explicit allowlist of method + path pairs; anything else fails the suite.
 
 ---
 
@@ -274,6 +274,7 @@ Secrets (Johnny sets with `wrangler secret put`):
 - `GHL_TOKEN`
 - `STAFF_PIN`
 - `ID_SALT`
+- `PIN_PEPPER` (§15.3)
 
 Vars in `wrangler.toml`:
 - `GHL_LOCATION_ID = "ARCSFhJ0JlkcuzfZtyEJ"`
@@ -282,6 +283,7 @@ Vars in `wrangler.toml`:
 - `MEMBER_TAG_PREFIXES = "foundations-"`
 - `CHECKIN_EARLY_MIN = "180"` and `CHECKIN_LATE_MIN = "180"` (§2 window, minutes)
 - `KIOSK_BACKDATE_DAYS = "3"` and `STAFF_BACKDATE_DAYS = "30"` (§3 backdating, whole days)
+- `TAB_ITEMS`, `TAB_PROGRAMS`, `TAB_MIN_CENTS`, `TAB_MAX_ROLL_DAYS` (§15.3 drink tab; empty `TAB_ITEMS` turns it off)
 
 `.dev.vars.example` committed; `.dev.vars` gitignored. Parser must handle CRLF and BOM.
 
@@ -299,8 +301,9 @@ Vitest or node test runner, fixtures only, no network. Minimum:
 6. Rollup math: 30d, week (Mon-Sun ET), lifetime, label.
 7. Write scanner: no GHL write other than `PUT /contacts/{id}`.
 8. Schedule validation: rejects overlap, bad day, bad time.
-9. Kiosk page: never contains an email, phone, or the string "billing" in rendered HTML.
+9. Kiosk page: never contains an email, phone, or the string "billing" in rendered HTML. (§15.3: item names and prices are allowed. A balance or tab total is not.)
 10. Backdating: the kiosk and staff limits and their exact edges, a stale `clientTs` on a staff backfill, config override and fallback.
+11. Drink tab (§15.3): PIN hashing and constant-time compare, setup-token expiry and single use, the 10-minute link limit, lockout edges, kids exclusion, the no-card flag, online-only failure copy, feature off when `TAB_ITEMS` is empty, pending migration hides everything and never touches check-in. Close-out fixtures: a crash after `schedule_created` creates no second schedule, a stuck schedule is adopted by exact name only, an already-active schedule is not re-activated, a test-mode transaction is skipped, a POS-only card is skipped, no card, missing email or phone, a tab under `TAB_MIN_CENTS` rolls, a `TAB_MAX_ROLL_DAYS`-old tab under the minimum is charged, and Charged at POS makes no GHL call.
 
 ---
 
@@ -365,7 +368,7 @@ First real use: check yourself in from the iPad, then open `/staff` and confirm 
 
 ## §13 Non-goals for V1
 
-Payment, billing state, waivers (the waiver prompt in §15 is the one exception, approved for V2 on 2026-09-07), class booking, reservations, QR codes, key tags, wallet passes, belt tracking, promotions, family accounts, member portal, push notifications, native apps, GHL Custom Objects, reading GHL calendars, any write to GHL other than the five rollup fields, anything that touches `btt-ops`.
+Payment and billing state (lifted for the drink tab only, §15.3, 2026-09-25; class billing, dues and refunds stay out), waivers (the waiver prompt in §15 is the one exception, approved for V2 on 2026-09-07), class booking, reservations, QR codes, key tags, wallet passes, belt tracking, promotions, family accounts, member portal, push notifications, native apps, GHL Custom Objects, reading GHL calendars, any write to GHL other than the five rollup fields, anything that touches `btt-ops`.
 
 ---
 
@@ -423,3 +426,233 @@ Staff need to know who is due to be looked at for a stripe. Johnny: "start with 
 **Schema:** a `promotions` table. Migration `src/db/migrations/003_promotions.sql`. Per the §15.1 rule, every query must tolerate the table not existing yet: `hasPromotionsTable` in `src/schema-caps.js`, and a pending migration hides the tab rather than breaking the staff page.
 
 **Not built, deliberately.** No GHL notification. That would need a sixth custom field key, which is Johnny's to create and name (§0.2), and the tab removes most of the need. Offer it once the tab has been used.
+
+### 15.3 Drink tab (approved 2026-09-25, revision 3)
+
+A member who checks in can put a drink on their tab. The tab is charged to the card they already have on file, after staff review, through GHL invoices with saved-card auto-pay. Nobody handles money at the desk. Phase 1 is **adults only**. Kids billed to a parent, and merchandise, are later phases, described at the end so Phase 1 is built to take them without rework.
+
+Written from the btt-ops brief (revisions 1 and 2), this session's two reviews, and the GHL facts below, which were verified against the live sub-account from the btt-ops side on 2026-09-25. Nothing here was invented in this repo: every endpoint, field, id and behaviour is either from that verification or from this repo's own code.
+
+**Status of the payment step: unproven until Johnny confirms.** A $0.50 live test invoice was scheduled on 2026-09-25 at 09:01 UTC against a card saved from a one-time Apple Pay payment through a payment link. The invoice generated and sent on time. The saved-card charge is queued for the invoice's due date, 23:59:59 ET on 2026-09-25 (03:59:59Z on 09-26). The test card was saved with `setup_future_usage = off_session`, the same way every funnel and payment-link card is, so it is a representative test. **Build step 6 (the close-out's GHL calls) does not start until Johnny confirms the test was charged.** If it was not, stop and report.
+
+#### Amendments to earlier sections (also noted in place)
+
+- **§2 kiosk:** "never shown on the kiosk" still holds for balances, status and holds. The one exception is the drink row and its prices. The kiosk never shows a running tab total. "Never show an error to a student" and the offline queue cover **check-in only**. A purchase is online-only, is never queued on the iPad (that would mean storing a PIN there), and a failed one says so. Check-in behaviour is unchanged.
+- **§6 allowed calls:** the list grows to the table under "Allowed GHL calls" below. `test/write-scanner.test.js` becomes an explicit allowlist of exactly those method + path pairs.
+- **§8 secrets:** adds `PIN_PEPPER`. `GHL_TOKEN` keeps its name; Johnny widened its scopes on 2026-09-25.
+- **§9 test 9:** the kiosk page may contain item names and prices. Never an email, phone, balance, or the word "billing".
+- **§13 non-goals:** "Payment, billing state" is lifted for the drink tab only.
+
+#### Who can buy (Phase 1)
+
+A member sees the drink row only if their programs include one of `TAB_PROGRAMS` (`adult`) **and none of the kids programs**. The 14-year-old approved for the adult class (§4) carries both, so they are excluded until Phase 1b bills them to a parent. A member whose last close-out found no usable card (`skipped_no_card`, below) does not see the row either, until staff clear that on the member screen; otherwise a tab grows with nothing behind it.
+
+#### Kiosk flow
+
+1. Check-in is unchanged. Confirm screen, success screen, duplicate guard and offline queue all work exactly as today.
+2. For an eligible member, the success screen gains one optional row under the checkmark: `Water $1` and `Hydration $3`, and a small line "Charged to your card on file." Ignoring it changes nothing and the screen returns home on the normal timer. Tapping an item extends the timer.
+3. Tapping an item asks for the member's **purchase PIN** (4 digits, large keypad).
+   - Right PIN: the purchase is recorded and the screen says "Added to your tab. Water, $1."
+   - Wrong PIN: "That PIN didn't match."
+   - Locked: "Purchases are paused for this account. Ask at the desk."
+   - Network or server failure: "That didn't go through. Nothing was added to your tab."
+4. **Lockouts.** Per member: 5 wrong PINs in 15 minutes locks that member's purchases for 15 minutes. Kiosk-wide: every failed PIN is recorded, and the staff page shows today's count plus any member currently locked. Spraying one common PIN across many members will not trip a per-member lock, but it shows on the staff page, and the review screen shows each line's time so an odd pattern is visible. The real safeguard is the staff review before any charge.
+5. A member with no PIN yet sees "Set up your purchase PIN" and one button: "Text me a setup link". The kiosk never lets someone create a PIN on the spot. **At most one setup link per member per 10 minutes**; a second tap inside that window says "We just sent one. Check your texts."
+
+Copy follows §0.9: no exclamation points, no em dashes, no emoji beyond the existing checkmark.
+
+#### Purchase PIN
+
+- **Belongs to the payer**, not the person drinking. In Phase 1 they are the same adult. In Phase 1b a kid's purchase asks for the parent's PIN.
+- **Stored** in D1 as `HMAC-SHA256(key = PIN_PEPPER, message = salt || payer_contact_id || pin)` with a random per-member salt, hex. Not PBKDF2: Workers WebCrypto rejects more than 100,000 PBKDF2 iterations, and even that likely exceeds the Free plan's CPU budget per request. Slow hashing does not protect a 4-digit PIN anyway, because anyone holding the table can try all 10,000. The protection is `PIN_PEPPER`, which never touches D1. Compare in constant time. PINs are never stored in GHL or logged.
+- **Setup by text, following the §15.1 pattern.** The Worker never sends messages. "Text me a setup link" creates a one-time token (random, 30-minute expiry, single use, stored hashed) and writes the link into the contact custom field `purchase_pin_link` with the allowed contact write. Johnny's workflow "Check-In: Purchase PIN setup link" fires on that field changing and texts the link. The Worker **never clears** that field; it only overwrites it with a new link. The link opens a small page on the Worker (`/pin`) where the member enters the PIN twice.
+- **Staff help:** the staff page can open the same setup screen for a member standing at the desk, and the member types the PIN themselves. Staff never type a member's PIN. Staff can also clear a lockout.
+- **Forgot PIN** on the kiosk is the same text-a-link flow, under the same 10-minute limit.
+- `purchase_pin_link` is added to `requiredFieldKeys` in `src/fields.js` when the tab is on, so a missing field shows on `/health` before the first member taps the button.
+
+#### Recording (D1)
+
+New migration `src/db/migrations/004_tab.sql`. Per the §15.1 rule, every query tolerates these tables not existing yet (`hasTabTables` in `src/schema-caps.js`). A pending migration hides the drink row and the staff tab screens, and never touches check-in.
+
+```sql
+CREATE TABLE IF NOT EXISTS purchase_pins (
+  payer_contact_id TEXT PRIMARY KEY,
+  pin_hash         TEXT NOT NULL,
+  salt             TEXT NOT NULL,
+  set_at           TEXT NOT NULL,
+  set_by           TEXT NOT NULL CHECK (set_by IN ('link','staff')),
+  failed_count     INTEGER NOT NULL DEFAULT 0,
+  first_failed_at  TEXT,
+  locked_until     TEXT
+);
+
+CREATE TABLE IF NOT EXISTS pin_setup_tokens (
+  token_hash       TEXT PRIMARY KEY,
+  payer_contact_id TEXT NOT NULL,
+  created_at       TEXT NOT NULL,          -- also enforces one link per member per 10 minutes
+  expires_at       TEXT NOT NULL,
+  used_at          TEXT
+);
+
+CREATE TABLE IF NOT EXISTS pin_failures (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  payer_contact_id TEXT NOT NULL,
+  failed_at        TEXT NOT NULL           -- kiosk-wide counter for the staff page
+);
+
+CREATE TABLE IF NOT EXISTS purchases (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  buyer_contact_id  TEXT NOT NULL,         -- who took the item
+  payer_contact_id  TEXT NOT NULL,         -- whose card pays (same as buyer in Phase 1)
+  item_key          TEXT NOT NULL,
+  product_id        TEXT NOT NULL,
+  price_id          TEXT NOT NULL,
+  unit_amount_cents INTEGER NOT NULL,      -- price at the moment of purchase
+  qty               INTEGER NOT NULL DEFAULT 1,
+  purchased_at      TEXT NOT NULL,         -- ISO UTC
+  method            TEXT NOT NULL CHECK (method IN ('kiosk','staff')),
+  status            TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','voided','invoiced')),
+  closeout_payer_id INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS closeouts (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at   TEXT NOT NULL,
+  approved_by  TEXT NOT NULL DEFAULT 'staff'
+);
+
+CREATE TABLE IF NOT EXISTS closeout_payers (
+  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  closeout_id         INTEGER NOT NULL,
+  payer_contact_id    TEXT NOT NULL,
+  amount_cents        INTEGER NOT NULL,
+  invoice_name        TEXT NOT NULL,       -- "BTT tab #<closeout_id>-<payer_contact_id>", unique
+  state               TEXT NOT NULL CHECK (state IN
+                        ('pending','schedule_created','autopay_on','paid','failed',
+                         'paid_at_pos','skipped_no_card','skipped_missing_contact')),
+  invoice_schedule_id TEXT,
+  invoice_id          TEXT,
+  card_brand          TEXT,
+  card_last4          TEXT,
+  card_source         TEXT,                -- invoice | funnel | payment_link
+  detail              TEXT,
+  updated_at          TEXT NOT NULL,
+  UNIQUE (closeout_id, payer_contact_id)
+);
+
+CREATE TABLE IF NOT EXISTS tab_flags (
+  payer_contact_id TEXT PRIMARY KEY,
+  no_card_since    TEXT NOT NULL           -- set by skipped_no_card; cleared by staff
+);
+```
+
+Amounts are in cents, copied at purchase time, so a price change never rewrites history. `invoiced` on a purchase means an invoice was created, not that the card was charged; `closeout_payers.state` tracks the charge. `invoice_name` is derived from the close-out id and the payer id, so it exists before the row does and is unique without a second write.
+
+#### Items
+
+Phase 1 items live in config so a price change is an edit, not code. `wrangler.toml`:
+
+```toml
+# Drink tab (§15.3). Empty TAB_ITEMS turns the feature off.
+TAB_ITEMS = "water,hydration"
+TAB_PROGRAMS = "adult"
+TAB_MIN_CENTS = "500"
+TAB_MAX_ROLL_DAYS = "28"
+```
+
+`tab-items.json` at repo root, committed, validated on startup like `schedule.json`:
+
+```json
+{
+  "water":     { "label": "Water",     "product_id": "6ab637c780e11d5e52e6e16a", "price_id": "6ab637c8a45571af67f0ed40", "amount_cents": 100 },
+  "hydration": { "label": "Hydration", "product_id": "6ab637c875098f3f8f8ea591", "price_id": "6ab637c880e11d5e52e6e1a3", "amount_cents": 300 }
+}
+```
+
+These ids are real: the btt-ops session created both products through the GHL API on 2026-09-25 and read the ids from the responses ("Water" $1 and "Hydration Drink" $3, both PHYSICAL, available in store). The kiosk label is "Hydration".
+
+#### Minimum charge (Johnny, 2026-09-25)
+
+A payer is charged when their open tab reaches **$5 (`TAB_MIN_CENTS`) or their oldest open purchase is 28 days old (`TAB_MAX_ROLL_DAYS`), whichever comes first.** Anyone below both rolls to the next close-out. That keeps card fees (about 2.9% plus 30¢ per charge) from eating a third of a $1 water, without letting a light buyer's tab roll forever.
+
+#### Staff page
+
+- **Tonight's tab:** every purchase today, with void (sets `voided`, never deletes).
+- **PIN activity:** today's failed-PIN count, and any member currently locked, with a clear-lockout button.
+- **Member screen:** that member's open tab and history; open the PIN setup screen for them; clear a lockout; clear a no-card flag.
+- **Close out ("Review and charge"):**
+  1. Lists every payer with open purchases: their lines with times, their total, and one of: the card that will be charged (brand, last 4 and source), "Rolling to next week ($X, under $5)", "No card on file", or "Missing email or phone". Card status is fetched **one payer per request from the browser** and fills in as it goes, so the screen never needs more than a handful of GHL calls in one Worker request. Staff can void lines.
+  2. One button, "Charge N members, $X", creates the `closeouts` row and one `closeout_payers` row per payer to be charged, state `pending`, **before any GHL call**.
+  3. The page then works through the payers **one request per payer**, looping from the browser, showing live progress (pending, invoiced, paid, failed, skipped). Each payer takes about five GHL calls, well under the Workers Free limit of 50 outbound calls per request.
+  4. Leaving the page and coming back resumes where it stopped.
+  5. **Charged at POS:** an action on any payer row that sets `paid_at_pos` with a note and marks their purchases `invoiced`, making no GHL call. Staff already charge saved cards at the GHL POS, so a failed payer, or one the invoice route cannot charge, is closed out by hand. The tab never depends on auto-pay alone.
+  6. **Status refresh** happens when the close-out screen is opened, one payer per request from the browser. The cron never touches the tab.
+
+#### Card on file (verified 2026-09-25)
+
+Where cards get saved: the flag is `chargeSnapshot.payment_method_options.card.setup_future_usage`. The top-level `chargeSnapshot.setup_future_usage` is always null; ignore it. The flag was `off_session` on 27/27 live funnel payments, 4/4 payment-link payments and 5 of 35 invoice payments. Funnels (founding deposits, Foundations sign-ups) and payment links (intros) are where cards get saved; later invoices and POS sales reuse the saved method. Reuse is proven, including Link wallet cards, on four named members each charged again by invoice and at the POS with no card present. Across the last 73 live succeeded non-zero payments, 50 contacts have a card with a Stripe customer and payment method.
+
+**Lookup rule:**
+1. `GET /payments/transactions?altId={location}&altType=location&contactId={payer}`. Consider only `status = succeeded`, `liveMode = true`. Test-mode card ids fail in live mode ("No such paymentmethod … a similar object exists in test mode").
+2. Take the most recent whose `entitySourceType` is `invoice`, `funnel` or `payment_link`. `GET /payments/transactions/{id}?altId=…&altType=location` gives `chargeSnapshot.customer` (`cus_…`), `chargeSnapshot.payment_method.id` (`pm_…`), `card.brand`, `card.last4`.
+3. A `point_of_sale` transaction counts only if its payment method id also appears on one of those three kinds. A card tapped at the desk may not be saved.
+4. When one card has several payment method ids, use the one on the most recent successful charge.
+5. No usable card: `skipped_no_card`, purchases stay open, `tab_flags` row set so the kiosk hides the drink row until staff clear it.
+
+#### Close-out, per payer (one Worker request)
+
+Each step writes its result to the `closeout_payers` row before the next step runs, so a crash at any point resumes safely and never double-charges:
+
+1. **`pending`, no schedule id:** check for a stuck earlier attempt: `GET /invoices/schedule?altId=…&altType=location&search=<invoice_name>`. `search` matches any part of the name, so **filter the results for an exact name match** before adopting one. Deleted schedules do not appear. If one matches, save its id, set `schedule_created`, go to step 5.
+2. **Contact details.** `GET /contacts/{payer}` for name, email and phone (D1 holds none of these, by design). Missing email or phone: `skipped_missing_contact`, purchases stay open, stop.
+3. **Card on file**, per the lookup rule. Save brand, last 4, source on the row.
+4. **Create the schedule.** `POST /invoices/schedule` with `altId`, `altType: "location"`, `name: <invoice_name>`, `contactDetails: { id, name, phoneNo, email }` (all four required), `schedule: { executeAt: "YYYY-MM-DDTHH:mm:ssZ" }` (that exact format, **no milliseconds**, or 422), `liveMode: true`, `businessDetails: { name: "Brazilian Top Team Bridgewater" }`, `currency: "USD"`, `discount: { type: "percentage", value: 0 }`, `items` one per line with `name`, `currency`, `amount` (dollars), `qty`, `productId`, `priceId`, `type: "one_time"`. Save the returned id immediately: `schedule_created`.
+5. **Auto-pay on and activate, once.** Re-POSTing this has not been tested and will not be on a live card, so treat it as **not idempotent**: first `GET /invoices/schedule/{scheduleId}` and, if it is already active with auto-pay, skip the POST. Otherwise `POST /invoices/schedule/{scheduleId}/schedule` with `altId`, `altType`, `liveMode: true`, `autoPayment: { enable: true, type: "saved_card", paymentMethodId, customerId, card: { brand, last4 } }`. `type` must be exactly `"saved_card"`; `"card"`, `"stripe"` and empty all return 422. State `autopay_on`; mark that payer's purchases `invoiced` with `closeout_payer_id`.
+6. **Status, on demand.** `GET /invoices/?altId=…&altType=location&contactId={payer}` finds the generated invoice (its `scheduleId` matches). `status` moves from `sent` to `paid` when the card is charged. Record `invoice_id` and `paid` or `failed`. A failed charge re-opens nothing automatically; staff see it and use Charged at POS or Johnny decides.
+
+**Observed dependency (2026-09-25), pinned in the step 6 fixtures:** the schedule create body has no due-date field. GHL set `issueDate` to midnight ET of the `executeAt` day and `dueDate` to 23:59:59.999 ET the same day, and the saved-card charge runs on that due date. The invoice is generated at `executeAt` and immediately texted and emailed to the contact with GHL's built-in wording, which cannot be changed in this account. `executeAt` is set to a few minutes after the close-out, so the charge lands that night.
+
+#### Allowed GHL calls, exhaustively
+
+| Method | Path | Why |
+|---|---|---|
+| GET | `/contacts/` | roster sync (existing) |
+| GET | `/locations/{id}/customFields` | field ids (existing) |
+| PUT | `/contacts/{id}` | rollup fields, `checkin_last_at`, `purchase_pin_link` |
+| GET | `/contacts/{id}` | payer name, email, phone for the invoice |
+| GET | `/payments/transactions`, `/payments/transactions/{id}` | card on file |
+| GET | `/invoices/schedule` | find a stuck schedule by name |
+| GET | `/invoices/schedule/{id}` | is it already active, before step 5 |
+| POST | `/invoices/schedule` | create the tab invoice |
+| POST | `/invoices/schedule/{id}/schedule` | auto-pay on the saved card |
+| GET | `/invoices/`, `/invoices/{id}` | charge status |
+
+No refunds, no voids, no deletes, no other write. `test/write-scanner.test.js` enforces exactly this table.
+
+#### Johnny's setup tasks for §15.3
+
+1. Done: `BTT Check-In` integration scopes widened (`payments/transactions.readonly`, `invoices.readonly`, `invoices/schedule.readonly`, `invoices/schedule.write`).
+2. Done: contact field `purchase_pin_link` (key `contact.purchase_pin_link`), and the published workflow "Check-In: Purchase PIN setup link" (trigger: Contact Changed on that field; action: SMS with the link; re-entry on). An If/Else "field is not empty" guard is being added, because the trigger fires on any change.
+3. Accepted: GHL's invoice text and email use built-in templates that cannot be edited in this account, and there is no auto-pay-specific receipt. The member gets GHL's standard invoice text at close-out. The drink row's "Charged to your card on file" and the agreement clause (task 4) carry the explanation.
+4. Member agreement: a clause authorizing tab purchases to be charged to the card on file, saying they will get a weekly invoice text from BTT for their tab that is paid automatically, with nothing to do.
+5. `wrangler secret put PIN_PEPPER` (a long random string).
+6. Run `src/db/migrations/004_tab.sql` before the deploy that carries the tab.
+7. Confirm the $0.50 test charged. Step 6 waits on this.
+8. Stock the cooler.
+
+#### Build order for §15.3
+
+1. **Verify platform limits first:** Cloudflare's current per-request subrequest limit and CPU limit on this plan, whether D1 queries count toward it, and WebCrypto HMAC-SHA256. Record what was found, and how, in `STATUS.md`. This container's network proxy blocks the Cloudflare docs; if it still does, say so and record the numbers used as unverified.
+2. Migration 004, `hasTabTables`, `tab-items.json` loading and validation, `TAB_*` config. A pending migration or empty `TAB_ITEMS` hides everything and never touches check-in.
+3. PIN: HMAC hashing, setup-token flow with the 10-minute limit, the `/pin` setup page, per-member lockout, kiosk-wide failure log, staff open-setup and clear-lockout. `purchase_pin_link` added to `requiredFieldKeys`. Tests for hashing, constant-time compare, expiry, single use, the 10-minute limit and lockout edges.
+4. Kiosk drink row and online-only purchase recording, with the eligibility rule (adult, no kids program, no no-card flag). Tests for the kids exclusion, the flag, and the failure copy.
+5. Staff: tonight's tab, void, member tab, PIN activity, no-card clear.
+6. **Gated on the $0.50 test.** Close-out: review screen with the $5 / 28-day rule and per-payer card status, `closeout_payers` state machine, one payer per request, resume, Charged at POS, status refresh. Fixture tests, no network, per §9 item 11.
+7. `STATUS.md` and the deploy commands.
+
+**Noted, not part of this work:** the nightly rollup in `src/rollup.js` is not batched and will hit the same 50-call limit as membership grows. Fine today; flagged in `STATUS.md`.
+
+#### Later phases (do not build yet; build Phase 1 so these slot in)
+
+- **Phase 1b, kids billed to a parent.** The roster sync reads a contact custom field `payer_contact_id` on each kid (the btt-ops side creates and fills it). A kid with a payer sees the drink row; the PIN pad asks for the **parent's** PIN; the purchase is recorded with `buyer` = kid and `payer` = parent. A kid with no `payer_contact_id` never sees the drink row. The 14-year-old in the adult class becomes eligible here, billed to the parent. The waiver nudge (§15.1) should also go to the payer here.
+- **Phase 2, merchandise.** A "Shop" button on the kiosk home screen. Items come from a GHL product collection rather than `tab-items.json`, including variants (sizes) and stock. A parent who has already checked a kid in picks an item and size, enters their PIN, and it goes on the same tab. Keep item handling data-driven so Phase 2 swaps the source, not the flow.
