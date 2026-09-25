@@ -450,7 +450,7 @@ A member sees the drink row only if their programs include one of `TAB_PROGRAMS`
 #### Kiosk flow
 
 1. Check-in is unchanged. Confirm screen, success screen, duplicate guard and offline queue all work exactly as today.
-2. For an eligible member, the success screen gains one optional row under the checkmark: `Water $1` and `Hydration $3`, and a small line "Charged to your card on file." Ignoring it changes nothing and the screen returns home on the normal timer. Tapping an item extends the timer.
+2. For an eligible member, the success screen gains one optional block under the checkmark: "Thirsty?", then `Water $1` and `Hydration $3`, then in small print "Charged to your account." (Johnny, 2026-09-25.) Ignoring it changes nothing and the screen returns home on the normal timer. Tapping an item extends the timer.
 3. Tapping an item asks for the member's **purchase PIN** (4 digits, large keypad).
    - Right PIN: the purchase is recorded and the screen says "Added to your tab. Water, $1."
    - Wrong PIN: "That PIN didn't match."
@@ -465,7 +465,7 @@ Copy follows §0.9: no exclamation points, no em dashes, no emoji beyond the exi
 
 - **Belongs to the payer**, not the person drinking. In Phase 1 they are the same adult. In Phase 1b a kid's purchase asks for the parent's PIN.
 - **Stored** in D1 as `HMAC-SHA256(key = PIN_PEPPER, message = salt || payer_contact_id || pin)` with a random per-member salt, hex. Not PBKDF2: Workers WebCrypto rejects more than 100,000 PBKDF2 iterations, and even that likely exceeds the Free plan's CPU budget per request. Slow hashing does not protect a 4-digit PIN anyway, because anyone holding the table can try all 10,000. The protection is `PIN_PEPPER`, which never touches D1. Compare in constant time. PINs are never stored in GHL or logged.
-- **Setup by text, following the §15.1 pattern.** The Worker never sends messages. "Text me a setup link" creates a one-time token (random, 30-minute expiry, single use, stored hashed) and writes the link into the contact custom field `purchase_pin_link` with the allowed contact write. Johnny's workflow "Check-In: Purchase PIN setup link" fires on that field changing and texts the link. The Worker **never clears** that field; it only overwrites it with a new link. The link opens a small page on the Worker (`/pin`) where the member enters the PIN twice.
+- **Setup by text, following the §15.1 pattern.** The Worker never sends messages. "Text me a setup link" creates a one-time token (random, 30-minute expiry, single use, stored hashed) and writes the link into the contact custom field `purchase_pin_link` with the allowed contact write. Johnny's workflow "Check-In: Purchase PIN setup link" fires on that field changing and texts the link. The Worker **never clears** that field; it only overwrites it with a new link. The link opens a small page on the Worker (`/pin`) where the member enters the PIN twice. The page talks about purchases generally, not drinks: the same PIN covers merchandise in Phase 2 (Johnny, 2026-09-25).
 - **Staff help:** the staff page can open the same setup screen for a member standing at the desk, and the member types the PIN themselves. Staff never type a member's PIN. Staff can also clear a lockout.
 - **Forgot PIN** on the kiosk is the same text-a-link flow, under the same 10-minute limit.
 - `purchase_pin_link` is added to `requiredFieldKeys` in `src/fields.js` when the tab is on, so a missing field shows on `/health` before the first member taps the button.
@@ -633,7 +633,7 @@ No refunds, no voids, no deletes, no other write. `test/write-scanner.test.js` e
 
 1. Done: `BTT Check-In` integration scopes widened (`payments/transactions.readonly`, `invoices.readonly`, `invoices/schedule.readonly`, `invoices/schedule.write`).
 2. Done: contact field `purchase_pin_link` (key `contact.purchase_pin_link`), and the published workflow "Check-In: Purchase PIN setup link" (trigger: Contact Changed on that field; action: SMS with the link; re-entry on). An If/Else "field is not empty" guard is being added, because the trigger fires on any change.
-3. Accepted: GHL's invoice text and email use built-in templates that cannot be edited in this account, and there is no auto-pay-specific receipt. The member gets GHL's standard invoice text at close-out. The drink row's "Charged to your card on file" and the agreement clause (task 4) carry the explanation.
+3. Accepted: GHL's invoice text and email use built-in templates that cannot be edited in this account, and there is no auto-pay-specific receipt. The member gets GHL's standard invoice text at close-out. The drink row's "Charged to your account" and the agreement clause (task 4) carry the explanation.
 4. Member agreement: a clause authorizing tab purchases to be charged to the card on file, saying they will get a weekly invoice text from BTT for their tab that is paid automatically, with nothing to do.
 5. `wrangler secret put PIN_PEPPER` (a long random string).
 6. Run `src/db/migrations/004_tab.sql` before the deploy that carries the tab.

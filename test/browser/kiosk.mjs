@@ -225,7 +225,8 @@ await step('drink tab: an adult with a PIN sees the row, types the PIN, the drin
   await page.waitForSelector('#tab.active');
   assert.deepEqual(await page.locator('.drink .n').allTextContents(), ['Water', 'Hydration']);
   assert.deepEqual(await page.locator('.drink .p').allTextContents(), ['$1', '$3']);
-  assert.match(await page.locator('#tab-note').textContent(), /Charged to your card on file/);
+  assert.equal(await page.locator('#tab-ask').textContent(), 'Thirsty?');
+  assert.match(await page.locator('#tab-note').textContent(), /Charged to your account/);
   await page.screenshot({ path: join(OUT, 'ipad-drinks.png') });
 
   await page.click('.drink[data-item="water"]');

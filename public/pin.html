@@ -43,7 +43,7 @@
   </form>
   <div id="done" class="done">
     <div class="check">&#10003;</div>
-    <p>Your PIN is set. Use it at the kiosk to put a drink on your tab.</p>
+    <p>Your PIN is set. Use it at the kiosk whenever you put something on your tab.</p>
   </div>
 <script>
   const $ = (id) => document.getElementById(id);
@@ -58,7 +58,7 @@
       const r = await fetch(`/api/tab/pin-token?t=${encodeURIComponent(token)}`, { cache: 'no-store' });
       const d = await r.json();
       if (!d.ok) { $('intro').textContent = explain[d.reason] || explain.invalid; return; }
-      $('intro').textContent = d.first ? `Hi ${d.first}. Pick a 4-digit PIN. You will type it at the kiosk when you put a drink on your tab.` : 'Pick a 4-digit PIN. You will type it at the kiosk when you put a drink on your tab.';
+      $('intro').textContent = d.first ? `Hi ${d.first}. Pick a 4-digit PIN. You will type it at the kiosk whenever you buy something and put it on your tab.` : 'Pick a 4-digit PIN. You will type it at the kiosk whenever you buy something and put it on your tab.';
       $('form').classList.add('active');
       $('pin').focus();
     } catch {

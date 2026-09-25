@@ -58,7 +58,8 @@
   .waiver img { width: 220px; height: 220px; border-radius: 12px; background: var(--bone); padding: 10px; }
   .tab { display: none; margin-top: 30px; padding-top: 24px; border-top: 1px solid var(--line); width: 100%; max-width: 520px; }
   .tab.active { display: block; }
-  .tab .note { color: var(--muted); font-size: 18px; margin: 0 0 14px; }
+  .tab .ask { font-family: var(--display); font-weight: 500; font-size: 34px; margin: 0 0 16px; }
+  .tab .note { color: var(--muted); font-size: 14px; margin: 12px 0 0; }
   .drinks { display: flex; gap: 14px; justify-content: center; }
   .drink { flex: 1; font-family: var(--body); background: var(--tile); border: 2px solid var(--line); border-radius: 18px; padding: 18px; color: var(--bone); cursor: pointer; }
   .drink:active { border-color: var(--gold); }
@@ -119,8 +120,9 @@
     <img id="waiver-qr" src="/waiver-qr.png" alt="Waiver QR code" onerror="this.style.display='none'">
   </div>
   <div id="tab" class="tab">
-    <p id="tab-note" class="note">Charged to your card on file.</p>
+    <p id="tab-ask" class="ask">Thirsty?</p>
     <div id="drinks" class="drinks"></div>
+    <p id="tab-note" class="note">Charged to your account.</p>
     <div id="tab-setup" class="setup"></div>
     <p id="tab-msg" class="tab-msg"></p>
   </div>
@@ -394,7 +396,9 @@
     $('tab-msg').textContent = '';
     box.classList.toggle('active', Boolean(tab));
     if (!tab) return;
-    $('tab-note').style.display = tab.hasPin && !tab.locked ? '' : 'none';
+    const showing = tab.hasPin && !tab.locked;
+    $('tab-ask').style.display = showing ? '' : 'none';
+    $('tab-note').style.display = showing ? '' : 'none';
     if (tab.locked) { $('tab-msg').textContent = LOCKED_COPY; return; }
     if (!tab.hasPin) { renderSetup(); return; }
     for (const it of tab.items) {
@@ -519,6 +523,7 @@
     }
     closePad();
     $('drinks').innerHTML = '';
+    $('tab-ask').style.display = 'none';
     $('tab-note').style.display = 'none';
     if (outcome.kind === 'added') $('tab-msg').textContent = outcome.message || 'Added to your tab.';
     else if (outcome.kind === 'locked') $('tab-msg').textContent = LOCKED_COPY;
