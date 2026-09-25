@@ -4,6 +4,7 @@
 // Worker itself never sends a message.
 
 import { getFieldIds } from './rollup.js';
+import { logSyncRow } from './synclog.js';
 
 export function waiverEnabled(env) {
   return Boolean(String(env.WAIVER_TAG || '').trim());
@@ -39,11 +40,5 @@ export async function notifyWaiverCheckin(env, deps, contactId, now = new Date()
  * this for weeks. Never throws.
  */
 export async function logWaiverFailure(env, contactId, reason, now = new Date()) {
-  try {
-    await env.DB.prepare('INSERT INTO sync_log (job, ran_at, outcome, detail) VALUES (?, ?, ?, ?)')
-      .bind('waiver', now.toISOString(), 'failed', JSON.stringify({ contactId, reason }))
-      .run();
-  } catch (e) {
-    console.warn(`could not log waiver failure for ${contactId}: ${e && e.message ? e.message : e}`);
-  }
+  await logSyncRow(env, 'waiver', 'failed', { contactId, reason }, now);
 }

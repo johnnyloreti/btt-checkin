@@ -45,3 +45,22 @@ test('brand tokens and fonts are the ones from the brief', () => {
   assert.match(html, /Check in anyway/);
   assert.match(html, /You're checked in/);
 });
+
+// The PIN setup page (§15.3) is member-facing too: same copy rules, and it
+// carries nothing about billing, balances or contact details.
+test('pin.html follows the member copy rules and carries no contact or billing details', () => {
+  const page = readRepoFile('public/pin.html');
+  const text = page.replace(/<script[\s\S]*?<\/script>/g, '').replace(/<style[\s\S]*?<\/style>/g, '').replace(/<[^>]+>/g, ' ');
+  assert.doesNotMatch(page, /[\w.+-]+@[\w-]+\.[\w.]+/, 'email');
+  assert.doesNotMatch(page, /\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}/, 'phone');
+  assert.doesNotMatch(page, /billing|balance|membership status|inactive/i);
+  assert.doesNotMatch(text, /!/);
+  assert.doesNotMatch(text, /—/);
+  const strings = [...page.matchAll(/(['"`])((?:\\.|(?!\1)[^\\])*)\1/g)].map((m) => m[2]);
+  for (const str of strings) {
+    if (/^[\w./-]*$/.test(str) || str.startsWith('/')) continue;
+    assert.doesNotMatch(str, /!/, `exclamation in copy: ${str}`);
+    assert.doesNotMatch(str, /—/, `em dash in copy: ${str}`);
+  }
+  assert.match(page, /Set your purchase PIN/);
+});

@@ -11,7 +11,7 @@ import { memoryD1 } from './d1.js';
 
 const schedule = loadSchedule(readRepoFile('schedule.json'));
 const ITEMS = loadTabItems(readRepoFile('tab-items.json'));
-const ON = { TAB_ITEMS: 'water,hydration', TAB_PROGRAMS: 'adult' };
+const ON = { TAB_ITEMS: 'water,hydration', TAB_PROGRAMS: 'adult', PIN_PEPPER: 'a-long-pepper-for-tests' };
 
 test('tab-items.json in the repo is valid and carries the two Phase 1 items', () => {
   assert.deepEqual(Object.keys(ITEMS), ['water', 'hydration']);
@@ -129,6 +129,12 @@ test('/health: tab off with no tables is fine; tab on with no tables names migra
   const ready = await health({ ...ON, DB: memoryD1() }, schedule, new Date(), { tabItems: ITEMS });
   assert.equal(ready.ok, true);
   assert.deepEqual(ready.tab, { enabled: true, schema: true, error: null });
+});
+
+test('/health: the tab on without PIN_PEPPER is not ok', async () => {
+  const h = await health({ TAB_ITEMS: 'water', TAB_PROGRAMS: 'adult', DB: memoryD1() }, schedule, new Date(), { tabItems: ITEMS });
+  assert.equal(h.ok, false);
+  assert.match(h.error, /PIN_PEPPER/);
 });
 
 test('/health: a misconfigured tab is reported and is not ok', async () => {

@@ -10,6 +10,8 @@
 
 import { FIELD_KEYS, getFieldIds, resetFieldCache } from './rollup.js';
 import { waiverEnabled, waiverFieldKey } from './waiver.js';
+import { parseList } from './roster.js';
+import { PIN_LINK_FIELD } from './pin.js';
 
 /** The keys the Worker writes with the current config, in a stable order. */
 export function requiredFieldKeys(env = {}) {
@@ -18,6 +20,9 @@ export function requiredFieldKeys(env = {}) {
     const key = waiverFieldKey(env);
     if (key && !keys.includes(key)) keys.push(key);
   }
+  // The drink tab (§15.3) writes the PIN setup link. Required as soon as the
+  // tab is switched on, so /health goes red before the first member taps.
+  if (parseList(env.TAB_ITEMS).length > 0 && !keys.includes(PIN_LINK_FIELD)) keys.push(PIN_LINK_FIELD);
   return keys;
 }
 

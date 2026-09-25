@@ -6,7 +6,11 @@ import { fetchAllContacts, fetchCustomFieldIds, ghlPutContactCustomFields } from
 import { runRollup } from './rollup.js';
 import { notifyWaiverCheckin, waiverEnabled, logWaiverFailure } from './waiver.js';
 import { hasWaiverColumn, hasPromotionsTable, hasTabTables } from './schema-caps.js';
-import { tabConfig } from './tab.js';
+import { tabConfig, canBuy } from './tab.js';
+import { createSetupToken, readSetupToken, completeSetup, clearLockout, pinActivity, writePinLink, requirePepper } from './pin.js';
+import { hasNoCardFlag } from './purchases.js';
+import { logSyncRow } from './synclog.js';
+import { getFieldIds } from './rollup.js';
 import { stripeCandidates, recordPromotion, undoLastPromotion, promotionHistory, stripesEnabled } from './promotions.js';
 import { isStaff, pinMatches, issueToken, cookieHeader, SESSION_MS } from './staff-auth.js';
 import { buildIdMap, opaqueId, requireSalt } from './ids.js';
@@ -17,7 +21,8 @@ import { today, classRoster, voidAttendance, memberHistory } from './staff.js';
 import { localParts } from './time.js';
 
 /** Static files the Worker will hand to the assets binding. Everything else is 404. */
-const PUBLIC_ASSETS = new Set(['/', '/index.html', '/search.js', '/logo.png', '/waiver-qr.png', '/favicon.ico']);
+const PUBLIC_ASSETS = new Set(['/', '/index.html', '/search.js', '/logo.png', '/waiver-qr.png', '/favicon.ico', '/pin', '/pin.html']);
+const PUBLIC_API = new Set(['/api/roster', '/api/current-class', '/api/checkin', '/api/tab/pin-link', '/api/tab/pin-token', '/api/tab/pin-set', '/api/tab/purchase']);
 
 export function json(body, status = 200, headers = {}) {
   return new Response(JSON.stringify(body), {
@@ -102,6 +107,7 @@ export async function health(env, schedule, now = new Date(), opts = {}) {
     out.tab = { enabled: tab.enabled, schema: tabSchema, error: tab.error };
     if (tab.error) problems.push(tab.error);
     if (tab.enabled && !tabSchema) problems.push('drink tab tables missing: run src/db/migrations/004_tab.sql');
+    if (tab.enabled && String(env.PIN_PEPPER || '').length < 16) problems.push('PIN_PEPPER secret not set: wrangler secret put PIN_PEPPER');
     out.schemaCurrent = problems.length === 0 || (problems.length === 1 && Boolean(tab.error));
     if (problems.length) {
       out.ok = false;
@@ -151,10 +157,20 @@ export async function resolveMember(env, id) {
   if (typeof id !== 'string' || !/^[0-9a-f]{20}$/.test(id)) return null;
   const salt = requireSalt(env);
   // waiver is optional: never name it unless the migration has run (see schema-caps.js).
-  const cols = (await hasWaiverColumn(env)) ? 'ghl_contact_id, first_name, active, waiver' : 'ghl_contact_id, first_name, active';
+  const cols = (await hasWaiverColumn(env)) ? 'ghl_contact_id, first_name, last_name, programs, active, waiver' : 'ghl_contact_id, first_name, last_name, programs, active';
   const { results } = await env.DB.prepare(`SELECT ${cols} FROM members`).all();
   const map = await buildIdMap(results, salt);
   return map.get(id) || null;
+}
+
+/** Program keys on a members row, or [] when the JSON is bad. */
+export function memberPrograms(member) {
+  try {
+    const list = JSON.parse(member.programs || '[]');
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
 }
 
 async function readJson(request) {
@@ -191,6 +207,14 @@ export function defaultDeps() {
         contactId,
         now,
       ),
+    pinLink: (env, contactId, link, now) =>
+      writePinLink(
+        env,
+        { getFieldIds: (at) => getFieldIds(() => fetchCustomFieldIds(env), at), putContact: (id, fields) => ghlPutContactCustomFields(env, id, fields) },
+        contactId,
+        link,
+        now,
+      ),
     now: () => new Date(),
   };
 }
@@ -198,6 +222,21 @@ export function defaultDeps() {
 export function createApp(schedule, deps = defaultDeps(), opts = {}) {
   const tz = schedule.timezone;
   const tabItems = opts.tabItems || {};
+
+  // The tab (§15.3) exists only when it is switched on and its migration has
+  // run. Everything else about it hangs off this returning a config.
+  async function tabReady(env) {
+    const cfg = tabConfig(env, tabItems);
+    if (!cfg.enabled) return null;
+    if (!(await hasTabTables(env))) return null;
+    return cfg;
+  }
+  async function buyer(env, cfg, member) {
+    return canBuy(memberPrograms(member), cfg, { noCard: await hasNoCardFlag(env, member.ghl_contact_id) });
+  }
+  function setupLink(cfg, url, token) {
+    return `${cfg.publicOrigin || url.origin}/pin?t=${token}`;
+  }
   const now = () => (deps.now ? deps.now() : new Date());
 
   async function checkin(env, body, method, ctx) {
@@ -241,7 +280,7 @@ export function createApp(schedule, deps = defaultDeps(), opts = {}) {
 
       try {
         if (method === 'GET' && PUBLIC_ASSETS.has(path)) {
-          return asset(env, request, path === '/' ? '/index.html' : path);
+          return asset(env, request, path === '/' ? '/index.html' : path === '/pin' ? '/pin.html' : path);
         }
 
         if (method === 'GET' && path === '/health') {
@@ -268,7 +307,7 @@ export function createApp(schedule, deps = defaultDeps(), opts = {}) {
         }
 
         // ---- public, rate-limited ----
-        if (path === '/api/roster' || path === '/api/current-class' || path === '/api/checkin') {
+        if (PUBLIC_API.has(path)) {
           if (!(await allowRequest(env, request, PUBLIC))) return json({ error: 'slow down' }, 429, { 'retry-after': '60' });
         }
 
@@ -288,6 +327,52 @@ export function createApp(schedule, deps = defaultDeps(), opts = {}) {
           const body = await readJson(request);
           if (!body) return json({ error: 'expected JSON body' }, 400);
           return checkin(env, body, 'kiosk', ctx);
+        }
+
+        // ---- drink tab, public (§15.3) ----
+        if (path.startsWith('/api/tab/')) {
+          const cfg = await tabReady(env);
+          if (!cfg) return json({ error: 'not found' }, 404);
+          const at = now();
+
+          // "Text me a setup link": mint a token, write the link to GHL, and
+          // let Johnny's workflow send the text. The write is awaited so the
+          // kiosk can say honestly whether it went.
+          if (method === 'POST' && path === '/api/tab/pin-link') {
+            const body = await readJson(request);
+            if (!body) return json({ error: 'expected JSON body' }, 400);
+            const member = await resolveMember(env, body.contactId);
+            if (!member) return json({ error: 'unknown member' }, 404);
+            if (!(await buyer(env, cfg, member))) return json({ error: 'not eligible' }, 403);
+            requirePepper(env);
+            const t = await createSetupToken(env, member.ghl_contact_id, 'link', at);
+            if (!t.ok) return json({ ok: true, sent: false, reason: t.reason, retryAt: t.retryAt });
+            const link = setupLink(cfg, url, t.token);
+            const r = deps.pinLink ? await deps.pinLink(env, member.ghl_contact_id, link, at) : { ok: false, reason: 'no link writer' };
+            if (!r.ok) {
+              await logSyncRow(env, 'pin_link', 'failed', { contactId: member.ghl_contact_id, reason: r.reason }, at);
+              return json({ error: 'could not send the link' }, 502);
+            }
+            return json({ ok: true, sent: true });
+          }
+
+          if (method === 'GET' && path === '/api/tab/pin-token') {
+            const t = await readSetupToken(env, url.searchParams.get('t'), at);
+            if (!t.ok) return json({ ok: false, reason: t.reason });
+            const m = await env.DB.prepare('SELECT first_name FROM members WHERE ghl_contact_id = ?').bind(t.contactId).first();
+            return json({ ok: true, first: m ? m.first_name : '' });
+          }
+
+          if (method === 'POST' && path === '/api/tab/pin-set') {
+            const body = await readJson(request);
+            if (!body) return json({ error: 'expected JSON body' }, 400);
+            requirePepper(env);
+            const r = await completeSetup(env, body.token, body.pin, at);
+            if (!r.ok) return json({ ok: false, reason: r.reason }, 400);
+            return json({ ok: true });
+          }
+
+          return json({ error: 'not found' }, 404);
         }
 
         // ---- staff API (PIN) ----
@@ -324,6 +409,47 @@ export function createApp(schedule, deps = defaultDeps(), opts = {}) {
             if (!member) return json({ error: 'unknown member' }, 404);
             const history = await memberHistory(env, schedule, member.ghl_contact_id, now());
             return json({ ...history, promotions: await promotionHistory(env, member.ghl_contact_id) });
+          }
+
+          // ---- drink tab, staff (§15.3) ----
+          if (path.startsWith('/api/staff/tab/')) {
+            const cfg = await tabReady(env);
+            if (!cfg) return json({ error: 'drink tab is off' }, 404);
+            const at = now();
+
+            // Open the setup screen for a member at the desk. They type the
+            // PIN themselves; staff never do.
+            if (method === 'POST' && path === '/api/staff/tab/pin-setup') {
+              const body = await readJson(request);
+              if (!body) return json({ error: 'expected JSON body' }, 400);
+              const member = await resolveMember(env, body.contactId);
+              if (!member) return json({ error: 'unknown member' }, 404);
+              requirePepper(env);
+              const t = await createSetupToken(env, member.ghl_contact_id, 'staff', at);
+              return json({ ok: true, url: setupLink(cfg, url, t.token), expiresAt: t.expiresAt });
+            }
+            if (method === 'POST' && path === '/api/staff/tab/clear-lockout') {
+              const body = await readJson(request);
+              if (!body) return json({ error: 'expected JSON body' }, 400);
+              const member = await resolveMember(env, body.contactId);
+              if (!member) return json({ error: 'unknown member' }, 404);
+              return json(await clearLockout(env, member.ghl_contact_id));
+            }
+            if (method === 'GET' && path === '/api/staff/tab/activity') {
+              const salt = requireSalt(env);
+              const day = localParts(at, env.TZ || tz).date;
+              const dayStart = new Date(`${day}T00:00:00Z`);
+              // Midnight ET is 04:00Z or 05:00Z; a 5-hour reach back covers both.
+              dayStart.setUTCHours(dayStart.getUTCHours() + 5);
+              const a = await pinActivity(env, dayStart.toISOString(), at);
+              const locked = [];
+              for (const l of a.locked) {
+                const m = await env.DB.prepare('SELECT first_name, last_name FROM members WHERE ghl_contact_id = ?').bind(l.contactId).first();
+                locked.push({ id: await opaqueId(l.contactId, salt), first: m ? m.first_name : '', last: m ? m.last_name : '', lockedUntil: l.lockedUntil });
+              }
+              return json({ date: day, failedToday: a.failed, locked });
+            }
+            return json({ error: 'not found' }, 404);
           }
 
           // ---- stripes (§15.2) ----

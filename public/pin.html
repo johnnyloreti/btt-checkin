@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Purchase PIN</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root { --bg: #09090a; --bone: #f4f1e9; --gold: #e7c24c; --muted: rgba(244,241,233,.55); --line: rgba(244,241,233,.14); --tile: rgba(244,241,233,.06); }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: var(--bg); color: var(--bone); font-family: 'Inter', -apple-system, 'Helvetica Neue', Arial, sans-serif; }
+  body { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; text-align: center; }
+  .brand { font-family: 'Oswald', 'Arial Narrow', sans-serif; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); font-size: 16px; margin: 0 0 6px; }
+  h1 { font-family: 'Oswald', 'Arial Narrow', sans-serif; font-weight: 500; font-size: 36px; margin: 0 0 10px; }
+  p { font-size: 18px; color: var(--muted); margin: 0 0 24px; max-width: 360px; }
+  form { width: 100%; max-width: 360px; display: none; flex-direction: column; gap: 14px; }
+  form.active { display: flex; }
+  label { font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); text-align: left; }
+  input { font: inherit; font-size: 34px; letter-spacing: .5em; text-align: center; padding: 18px; border-radius: 14px; border: 2px solid var(--line); background: var(--tile); color: var(--bone); outline: none; width: 100%; }
+  input:focus { border-color: var(--gold); }
+  button { font-family: 'Oswald', 'Arial Narrow', sans-serif; font-weight: 600; font-size: 24px; letter-spacing: .08em; text-transform: uppercase; padding: 18px; border-radius: 14px; border: none; background: var(--gold); color: #1a1607; cursor: pointer; }
+  button:disabled { opacity: .5; }
+  .msg { min-height: 24px; color: var(--gold); font-size: 17px; margin-top: 8px; }
+  .done { display: none; }
+  .done.active { display: block; }
+  .done .check { font-family: 'Oswald', 'Arial Narrow', sans-serif; font-size: 96px; line-height: 1; color: var(--gold); }
+</style>
+</head>
+<body>
+  <p class="brand">Brazilian Top Team Bridgewater</p>
+  <h1 id="title">Set your purchase PIN</h1>
+  <p id="intro">One moment</p>
+  <form id="form" autocomplete="off">
+    <label for="pin">Choose 4 digits</label>
+    <input id="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" aria-label="New PIN">
+    <label for="pin2">Type it again</label>
+    <input id="pin2" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" aria-label="New PIN again">
+    <button id="save" type="submit">Save PIN</button>
+    <div id="msg" class="msg"></div>
+  </form>
+  <div id="done" class="done">
+    <div class="check">&#10003;</div>
+    <p>Your PIN is set. Use it at the kiosk to put a drink on your tab.</p>
+  </div>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const token = new URLSearchParams(location.search).get('t') || '';
+  const explain = {
+    invalid: 'This link is not valid. Ask for a new one at the kiosk.',
+    expired: 'This link has expired. Ask for a new one at the kiosk.',
+    used: 'This link was already used. Ask for a new one at the kiosk if you need to change your PIN.',
+  };
+  async function start() {
+    try {
+      const r = await fetch(`/api/tab/pin-token?t=${encodeURIComponent(token)}`, { cache: 'no-store' });
+      const d = await r.json();
+      if (!d.ok) { $('intro').textContent = explain[d.reason] || explain.invalid; return; }
+      $('intro').textContent = d.first ? `Hi ${d.first}. Pick a 4-digit PIN. You will type it at the kiosk when you put a drink on your tab.` : 'Pick a 4-digit PIN. You will type it at the kiosk when you put a drink on your tab.';
+      $('form').classList.add('active');
+      $('pin').focus();
+    } catch {
+      $('intro').textContent = 'No connection. Try again in a moment.';
+    }
+  }
+  $('form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const pin = $('pin').value;
+    const pin2 = $('pin2').value;
+    $('msg').textContent = '';
+    if (!/^\d{4}$/.test(pin)) { $('msg').textContent = 'Four digits, please.'; $('pin').focus(); return; }
+    if (pin !== pin2) { $('msg').textContent = 'Those did not match. Try again.'; $('pin2').value = ''; $('pin2').focus(); return; }
+    $('save').disabled = true;
+    try {
+      const r = await fetch('/api/tab/pin-set', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token, pin }) });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok && d.ok) {
+        $('form').classList.remove('active');
+        $('title').textContent = 'All set';
+        $('intro').textContent = '';
+        $('done').classList.add('active');
+        return;
+      }
+      $('msg').textContent = explain[d.reason] || 'That did not go through. Try again.';
+    } catch {
+      $('msg').textContent = 'No connection. Try again in a moment.';
+    } finally {
+      $('save').disabled = false;
+    }
+  });
+  start();
+</script>
+</body>
+</html>
