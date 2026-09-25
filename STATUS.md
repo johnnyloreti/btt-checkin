@@ -16,7 +16,10 @@
 | Public API with opaque ids and rate limits | `src/ids.js`, `src/checkin.js`, `src/classes.js`, `src/ratelimit.js` | 60/min/IP |
 | Staff page and API | `public/staff.html`, `public/staff-login.html`, `src/staff.js`, `src/staff-auth.js` | 12 h cookie, login 5/min/IP |
 | Nightly rollup push to GHL, 03:00 ET | `src/rollup.js` | The only GHL write |
-| Tests | `test/` | `npm test`: 128 unit tests, no network. `npm run test:browser` needs Playwright |
+| Waiver prompt (§15.1) | `src/waiver.js`, `src/fields.js` | Field check on every roster sync; nudge failures in `sync_log` |
+| Stripe tab (§15.2) | `src/promotions.js` | Eligibility from attended classes since the last stripe |
+| Drink tab (§15.3), Phase 1 minus the close-out | `src/tab.js`, `src/pin.js`, `src/purchases.js`, `public/pin.html`, `tab-items.json` | Kiosk drink row, PIN by texted link, staff Tab view. Close-out gated on the $0.50 test |
+| Tests | `test/` | `npm test`: 221 unit tests, no network. `npm run test:browser` needs Playwright |
 
 ## Decisions made without you (confirm or say otherwise)
 
@@ -104,12 +107,44 @@ Deploying before the migration is safe now: the tab reports that its migration i
 
 Not built: a GHL notification on a threshold. That needs a sixth custom field, which is yours to create and name. The tab covers most of the need; ask if you still want the alert.
 
+## V2: drink tab (§15.3)
+
+Built 2026-09-25, steps 1 to 5 of the build order in `CLAUDE.md` §15.3. **The close-out (step 6, the part that charges anyone) is not built yet.** It waits on you confirming the $0.50 test charged. Until then a member can put drinks on their tab and staff can see and remove them; nobody is charged.
+
+What a member sees: after an adult checks in, the success screen shows `Water $1` and `Hydration $3` with "Charged to your card on file." Tapping one asks for their 4-digit purchase PIN on a big keypad. A member with no PIN yet sees "Text me a setup link"; the Worker writes the link to the `purchase_pin_link` field and your GHL workflow texts it. The link opens `/pin`, where they pick the PIN. Kids never see any of this. A purchase is online only: if it does not reach the server, the screen says "That didn't go through. Nothing was added to your tab." and nothing is queued.
+
+What staff see: a **Tab** view on `/staff` with the day's lines, a running total of what is open, remove with a confirm tap, today's wrong-PIN count, and anyone locked (5 wrong PINs in 15 minutes locks that member for 15 minutes) with a clear button. The member screen gains a Tab section: open lines, history, PIN state, **Set up PIN** (opens the same setup screen for the member to type on; staff never type a PIN), clear lockout, and clear the no-card flag (set by the close-out when it finds nothing to charge; hides the drink row until cleared).
+
+Needs, in this order:
+
+1. The secret, once:
+```
+wrangler secret put PIN_PEPPER
+```
+Paste a long random string (30 or more characters). It is what protects the PINs; a copy of the database is useless without it. If it is ever changed, every PIN stops working and everyone sets a new one.
+2. The migration, once, **before** the deploy:
+```
+wrangler d1 execute btt-checkin --remote --file=src/db/migrations/004_tab.sql
+```
+3. `wrangler deploy`.
+4. Open `/health`. `tab.enabled` should be `true`, `tab.schema` `true`, `missingFields` `[]`. If `purchase_pin_link` is listed as missing, the workflow field name and the Worker's disagree; the field key must be `purchase_pin_link`.
+
+Deploying before the migration is safe: the drink row and the Tab view stay hidden, `/health` says which migration is pending, and check-in is untouched. Deploying without `PIN_PEPPER` is also safe: `/health` names it, and a PIN request fails with the member-facing failure line rather than a crash.
+
+Tune in `wrangler.toml`: `TAB_ITEMS` (blank turns the whole thing off), `TAB_PROGRAMS` (`adult`; a member buys only if every program they hold is listed, which keeps the 14-year-old in the adult class out until kids are billed to a parent), `TAB_MIN_CENTS` and `TAB_MAX_ROLL_DAYS` (used by the close-out), `PUBLIC_ORIGIN` (the host in the texted link). Prices and the GHL product ids are in `tab-items.json`; edit, `npm test`, commit, deploy.
+
+**Platform limits, recorded as unverified.** The build order asked for Cloudflare's current subrequest and CPU limits to be checked first. This container's network proxy blocks `developers.cloudflare.com`, so they could not be read here. The design assumes, from memory: 50 outbound calls per request on Workers Free, and that D1 queries count toward that. Nothing built so far comes near it (a purchase is a handful of D1 queries and no GHL call; a setup link is one GHL write). The close-out is designed for one payer per request so it stays under it whatever the exact number. Please open that page once and paste the two numbers; they go here. WebCrypto HMAC-SHA256, which the PIN uses, was exercised in Node's implementation of the same API and is the same primitive the opaque ids have used since day one.
+
+Known limit, not part of this work: the nightly rollup pushes every pending contact in one cron invocation, one GHL call each. Fine at today's numbers; it will need batching before the roster is in the dozens of pending contacts a night.
+
 ## Still open after go-live
 
 - Rotate `STAFF_PIN`; the first one was pasted into a chat.
 - Confirm the four class durations in `schedule.json`.
 - iPad: Add to Home Screen, Guided Access, auto-lock off.
 - Consider Workers Paid ($5/month) for the request and D1 caps.
+- Confirm the $0.50 test invoice charged (due 03:59:59Z on 2026-09-26). The close-out build waits on it.
+- Read the Cloudflare limits page once and paste the subrequest and CPU numbers for this plan into the §15.3 section above.
 
 ## Shipping a change from a session branch
 
@@ -204,7 +239,7 @@ Expect `outcome: ok` and `pushed: 1`. Open your contact in GHL and check the cus
 
 ## Operating it
 
-- `/health` shows the last roster sync, the last rollup, their outcomes, how many contacts are waiting for a rollup, `missingFields` (custom fields the Worker writes that GHL does not have; `ok` goes false while any are listed), and `waiverFailures24h` with the latest reason.
+- `/health` shows the last roster sync, the last rollup, their outcomes, how many contacts are waiting for a rollup, `missingFields` (custom fields the Worker writes that GHL does not have; `ok` goes false while any are listed), `waiverFailures24h` with the latest reason, and `tab` (enabled, schema present, any misconfiguration). A pending migration for any feature that is switched on makes `ok` false and names the file.
 - Outcomes mean: `ok` the job ran and did its work; `degraded` it ran but something was off (zero members, a missing field, a failed contact) and the detail says what; `failed` it could not do its job and touched nothing.
 - To read the log:
 ```
@@ -261,4 +296,4 @@ Cloudflare, replace all of this with a Custom Domain on the Worker.
 
 ## Not built (V2, per §10 and §13)
 
-Family view, member portal, QR codes, GHL calendar sync, notes, billing of any kind. (Stripes and belts came in as an approved V2 item, §15.2, and are built.) `schedule.json` stays the source of truth for classes until V1.1 replaces it with the GHL calendar sync.
+Family view, member portal, QR codes, GHL calendar sync, notes, class billing and dues. (Stripes and belts came in as an approved V2 item, §15.2, and are built. The drink tab, §15.3, is built up to the close-out.) `schedule.json` stays the source of truth for classes until V1.1 replaces it with the GHL calendar sync.
