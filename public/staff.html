@@ -34,6 +34,8 @@
   .row .count { color: var(--gold); font-weight: 600; font-variant-numeric: tabular-nums; }
   .row .tag { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); border: 1px solid var(--line); padding: 3px 8px; border-radius: 999px; }
   .row .tag.warn { color: var(--gold); border-color: var(--gold); }
+  .row .tag.gold { color: #1a1607; background: var(--gold); border-color: var(--gold); }
+  .status a { color: var(--gold); }
   .row .check { color: var(--gold); font-weight: 700; }
   .row .remove { font: inherit; font-size: 14px; font-weight: 600; background: none; border: 1px solid var(--line); color: var(--muted); padding: 8px 12px; border-radius: 10px; cursor: pointer; }
   .row .remove.confirm { color: #1a1607; background: var(--gold); border-color: var(--gold); }
@@ -75,6 +77,7 @@
   <button class="tab active" data-tab="tonight" type="button">Tonight</button>
   <button class="tab" data-tab="stripes" type="button">Stripes</button>
   <button class="tab" data-tab="members" type="button">Members</button>
+  <button class="tab" data-tab="tab" id="tab-nav" type="button">Tab</button>
   <button class="tab quiet" id="signout" type="button">Sign out</button>
 </header>
 
@@ -105,6 +108,17 @@
     <div id="stripes-list" class="list"></div>
   </section>
 
+  <section id="tabview" class="view">
+    <div class="datebar">
+      <button id="tab-prev" type="button" aria-label="Previous day">&#8249;</button>
+      <h2 id="tab-title" style="margin:0">Tab</h2>
+      <button id="tab-next" type="button" aria-label="Next day">&#8250;</button>
+    </div>
+    <p class="note" id="tab-summary"></p>
+    <div id="tab-activity" class="list" style="margin-bottom:18px"></div>
+    <div id="tab-list" class="list"></div>
+  </section>
+
   <section id="members" class="view">
     <h2>Members</h2>
     <input id="member-search" class="search" type="text" placeholder="Search any member" autocomplete="off" autocorrect="off" autocapitalize="words" spellcheck="false">
@@ -116,6 +130,11 @@
     <h2 id="member-title"></h2>
     <div id="member-facts" class="facts"></div>
     <button class="btn" id="member-add-class" type="button">+ Add a class</button>
+    <div id="member-tab" style="display:none">
+      <h2 style="font-size:22px">Tab <span class="sub" id="member-tab-total"></span></h2>
+      <div id="member-tab-actions" class="status" style="margin:0 0 12px"></div>
+      <div id="member-tab-list" class="list"></div>
+    </div>
     <h2 style="font-size:22px">Stripes and belts</h2>
     <div id="member-promotions" class="list"></div>
     <h2 style="font-size:22px">Last 30 days</h2>
@@ -154,6 +173,7 @@
   let date = null;          // "YYYY-MM-DD" being viewed
   let current = null;       // { name, startLocal } of the open class
   let picking = null;       // the member whose Add a class overlay is open
+  let tabDate = null;       // "YYYY-MM-DD" shown on the Tab view
   let roster = [];
   let rosterAt = 0;
 
@@ -194,7 +214,7 @@
   }
   function showView(id) {
     for (const v of document.querySelectorAll('.view')) v.classList.toggle('active', v.id === id);
-    const tab = id === 'tonight' || id === 'class' ? 'tonight' : id === 'stripes' ? 'stripes' : 'members';
+    const tab = id === 'tonight' || id === 'class' ? 'tonight' : id === 'stripes' ? 'stripes' : id === 'tabview' ? 'tab' : 'members';
     for (const t of document.querySelectorAll('.tab[data-tab]')) t.classList.toggle('active', t.dataset.tab === tab);
     window.scrollTo(0, 0);
   }
@@ -406,6 +426,7 @@
     fact('Roster synced', d.syncedAt ? `${fmtDate(d.syncedAt.slice(0, 10))} ${fmtClock(d.syncedAt)}` : 'never');
     fact('GHL rollup', d.rollupPending ? 'Pending tonight' : 'Up to date');
     renderPromotions(d, m);
+    renderMemberTab(d, m);
     picking = {
       m,
       first: d.first,
@@ -532,11 +553,156 @@
     }
   }
 
+  // ---------- drink tab (brief section 15.3) ----------
+  function confirmButton(label, confirmLabel, cls, onConfirm) {
+    const b = el('button', cls, label);
+    b.type = 'button';
+    b.addEventListener('click', async () => {
+      if (!b.classList.contains('confirm')) {
+        b.classList.add('confirm');
+        b.textContent = confirmLabel;
+        setTimeout(() => { b.classList.remove('confirm'); b.textContent = label; }, 4000);
+        return;
+      }
+      await onConfirm();
+    });
+    return b;
+  }
+  async function loadTab() {
+    const list = $('tab-list');
+    const activity = $('tab-activity');
+    list.innerHTML = '';
+    activity.innerHTML = '';
+    let data;
+    try {
+      data = await api(`/api/staff/tab/today${tabDate ? `?date=${tabDate}` : ''}`);
+    } catch (e) {
+      list.appendChild(el('div', 'empty', e.message));
+      return;
+    }
+    if (!data.enabled) {
+      $('tab-summary').textContent = '';
+      list.appendChild(el('div', 'empty', data.pendingMigration ? 'The drink tab needs its database migration.' : data.error ? `The drink tab is misconfigured: ${data.error}` : 'The drink tab is off.'));
+      return;
+    }
+    tabDate = data.date;
+    $('tab-title').textContent = `Tab, ${fmtDate(data.date)}`;
+    const open = data.purchases.filter((p) => p.status === 'open');
+    $('tab-summary').textContent = `${open.length} open line${open.length === 1 ? '' : 's'} today, ${data.openTotal}. ${data.activity.failedToday} wrong PIN${data.activity.failedToday === 1 ? '' : 's'} today.`;
+    for (const l of data.activity.locked) {
+      const row = el('div', 'row');
+      row.append(el('span', 'name', displayName(l)), el('span', 'tag warn', 'locked'), el('span', 'time', `until ${fmtClock(l.lockedUntil)}`));
+      const clear = el('button', 'remove', 'Clear lockout');
+      clear.type = 'button';
+      clear.addEventListener('click', async () => {
+        await post('/api/staff/tab/clear-lockout', { contactId: l.id });
+        toast(`Cleared for ${l.first}`);
+        await loadTab();
+      });
+      row.appendChild(clear);
+      activity.appendChild(row);
+    }
+    if (data.purchases.length === 0) {
+      list.appendChild(el('div', 'empty', 'Nothing on the tab this day'));
+      return;
+    }
+    for (const p of data.purchases) {
+      const row = el('div', 'row');
+      row.dataset.purchaseId = p.purchaseId;
+      row.append(el('span', 'time', fmtClock(p.purchasedAt)), el('span', 'name', displayName(p)), el('span', 'count', `${p.label} ${p.price}`));
+      if (p.method === 'staff') row.appendChild(el('span', 'tag', 'staff'));
+      if (p.status === 'voided') row.appendChild(el('span', 'tag warn', 'removed'));
+      if (p.status === 'invoiced') row.appendChild(el('span', 'tag gold', 'invoiced'));
+      if (p.status === 'open') {
+        row.appendChild(confirmButton('Remove', 'Confirm remove', 'remove', async () => {
+          await post('/api/staff/tab/void', { purchaseId: p.purchaseId });
+          toast(`Removed ${p.label} for ${p.first}`);
+          await loadTab();
+        }));
+      }
+      list.appendChild(row);
+    }
+  }
+  $('tab-prev').addEventListener('click', () => { if (tabDate) { tabDate = shiftDate(tabDate, -1); loadTab(); } });
+  $('tab-next').addEventListener('click', () => { if (tabDate) { tabDate = shiftDate(tabDate, 1); loadTab(); } });
+
+  function renderMemberTab(d, m) {
+    const box = $('member-tab');
+    const t = d.tab;
+    if (!t || !t.enabled) { box.style.display = 'none'; return; }
+    box.style.display = '';
+    $('member-tab-total').textContent = t.open.length ? `${t.open.length} open, ${fmtCents(t.openCents)}` : 'nothing open';
+    const actions = $('member-tab-actions');
+    actions.innerHTML = '';
+    const pinText = !t.pin.hasPin ? 'No purchase PIN yet.' : t.pin.locked ? `PIN locked until ${fmtClock(t.pin.lockedUntil)}.` : 'Purchase PIN set.';
+    actions.appendChild(el('span', '', pinText));
+    if (t.eligible || t.pin.hasPin) {
+      const setup = el('button', '', t.pin.hasPin ? 'Reset PIN' : 'Set up PIN');
+      setup.type = 'button';
+      setup.id = 'member-pin-setup';
+      setup.addEventListener('click', async () => {
+        try {
+          const r = await post('/api/staff/tab/pin-setup', { contactId: m.id });
+          // The member types it on that screen; staff never type a PIN.
+          const a = el('a', '', 'Open the setup screen and hand it over');
+          a.id = 'member-pin-link';
+          a.href = r.url;
+          a.target = '_blank';
+          a.rel = 'noopener';
+          setup.replaceWith(a);
+        } catch (e) {
+          toast(`Could not open setup: ${e.message}`);
+        }
+      });
+      actions.appendChild(setup);
+    }
+    if (t.pin.locked) {
+      const clear = el('button', '', 'Clear lockout');
+      clear.type = 'button';
+      clear.id = 'member-clear-lock';
+      clear.addEventListener('click', async () => { await post('/api/staff/tab/clear-lockout', { contactId: m.id }); toast('Lockout cleared'); await openMember(m); });
+      actions.appendChild(clear);
+    }
+    if (t.noCard) {
+      actions.appendChild(el('span', 'tag warn', 'no card on file'));
+      const clear = el('button', '', 'Clear no-card flag');
+      clear.type = 'button';
+      clear.id = 'member-clear-no-card';
+      clear.addEventListener('click', async () => { await post('/api/staff/tab/clear-no-card', { contactId: m.id }); toast('Flag cleared'); await openMember(m); });
+      actions.appendChild(clear);
+    } else if (!t.eligible) {
+      actions.appendChild(el('span', 'tag', 'not eligible'));
+    }
+    const list = $('member-tab-list');
+    list.innerHTML = '';
+    if (t.recent.length === 0) { list.appendChild(el('div', 'empty', 'No purchases yet')); return; }
+    for (const p of t.recent) {
+      const row = el('div', 'row');
+      row.append(el('span', 'time', fmtDate(p.purchasedAt.slice(0, 10))), el('span', 'name', `${p.label} ${p.price}`), el('span', 'time', fmtClock(p.purchasedAt)));
+      if (p.method === 'staff') row.appendChild(el('span', 'tag', 'staff'));
+      if (p.status === 'voided') row.appendChild(el('span', 'tag warn', 'removed'));
+      if (p.status === 'invoiced') row.appendChild(el('span', 'tag gold', 'invoiced'));
+      if (p.status === 'open') {
+        row.appendChild(confirmButton('Remove', 'Confirm remove', 'remove', async () => {
+          await post('/api/staff/tab/void', { purchaseId: p.purchaseId });
+          toast(`Removed ${p.label}`);
+          await openMember(m);
+        }));
+      }
+      list.appendChild(row);
+    }
+  }
+  function fmtCents(c) {
+    const n = Number(c) || 0;
+    return n % 100 === 0 ? `$${n / 100}` : `$${(n / 100).toFixed(2)}`;
+  }
+
   // ---------- nav ----------
   for (const t of document.querySelectorAll('.tab[data-tab]')) {
     t.addEventListener('click', async () => {
       if (t.dataset.tab === 'tonight') { showView('tonight'); await loadTonight(); }
       else if (t.dataset.tab === 'stripes') { showView('stripes'); await loadStripes(); }
+      else if (t.dataset.tab === 'tab') { showView('tabview'); await loadTab(); }
       else { showView('members'); $('member-search').focus(); }
     });
   }

@@ -13,6 +13,9 @@ import { createRequire } from 'node:module';
 import { createApp } from '../../src/app.js';
 import { syncRoster } from '../../src/roster.js';
 import { loadSchedule } from '../../src/schedule.js';
+import { loadTabItems } from '../../src/tab.js';
+import { recordPurchase } from '../../src/purchases.js';
+import { tabConfig } from '../../src/tab.js';
 import { memoryD1 } from '../d1.js';
 import { CONTACTS } from '../fixtures/contacts.js';
 
@@ -24,8 +27,9 @@ const OUT = process.argv[2] || join(ROOT, '.screenshots');
 mkdirSync(OUT, { recursive: true });
 
 const schedule = loadSchedule(readFileSync(join(ROOT, 'schedule.json'), 'utf8'));
+const tabItems = loadTabItems(readFileSync(join(ROOT, 'tab-items.json'), 'utf8'));
 const NOW = new Date('2026-09-05T15:05:00Z'); // Sat 11:05 ET
-const env = { MEMBER_TAGS: 'founding-member', MEMBER_TAG_PREFIXES: 'foundations-', STAFF_PIN: '1234', ID_SALT: 'browser-test-salt', TZ: 'America/New_York', STRIPE_CLASSES: '7', STRIPE_PROGRAMS: 'kids-3-5,kids-6-9,kids-10-14', DB: memoryD1() };
+const env = { MEMBER_TAGS: 'founding-member', MEMBER_TAG_PREFIXES: 'foundations-', STAFF_PIN: '1234', ID_SALT: 'browser-test-salt', TZ: 'America/New_York', STRIPE_CLASSES: '7', STRIPE_PROGRAMS: 'kids-3-5,kids-6-9,kids-10-14', TAB_ITEMS: 'water,hydration', TAB_PROGRAMS: 'adult', PIN_PEPPER: 'a-long-pepper-for-the-browser', PUBLIC_ORIGIN: 'https://checkin.bttbridgewater.com', DB: memoryD1() };
 await syncRoster(env, schedule, { fetchContacts: async () => ({ contacts: CONTACTS, pages: 1 }), now: new Date(NOW.getTime() - 3600_000) });
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8' };
 env.ASSETS = {
@@ -35,7 +39,7 @@ env.ASSETS = {
     return new Response(readFileSync(p), { headers: { 'content-type': TYPES[extname(p)] || 'application/octet-stream' } });
   },
 };
-const app = createApp(schedule, { runRosterSync: async () => ({ outcome: 'ok', members: 7 }), now: () => NOW });
+const app = createApp(schedule, { runRosterSync: async () => ({ outcome: 'ok', members: 7 }), now: () => NOW }, { tabItems });
 
 // Bridge node http → the Worker's fetch handler.
 const server = http.createServer(async (req, res) => {
@@ -267,6 +271,69 @@ await step('a member with no class that day is still offered the others', async 
 
   await page.click('#pick-close');
   await page.waitForSelector('#pick-overlay', { state: 'hidden' });
+});
+
+await step('tab: the day\'s lines with a total, remove with confirm, a locked member with a clear', async () => {
+  const cfg = tabConfig(env, tabItems);
+  await recordPurchase(env, cfg, { buyerId: 'c_dan', payerId: 'c_dan', itemKey: 'water', method: 'kiosk', now: new Date(NOW.getTime() - 20 * 60_000) });
+  await recordPurchase(env, cfg, { buyerId: 'c_dan', payerId: 'c_dan', itemKey: 'hydration', method: 'staff', now: new Date(NOW.getTime() - 5 * 60_000) });
+  env.DB.raw.prepare("INSERT INTO purchase_pins (payer_contact_id, pin_hash, salt, set_at, set_by, failed_count, first_failed_at, locked_until) VALUES ('c_dan', 'x', 'y', ?, 'staff', 5, ?, ?)")
+    .run(NOW.toISOString(), NOW.toISOString(), new Date(NOW.getTime() + 10 * 60_000).toISOString());
+  env.DB.raw.prepare("INSERT INTO pin_failures (payer_contact_id, failed_at) VALUES ('c_dan', ?), ('c_dan', ?)").run(NOW.toISOString(), NOW.toISOString());
+
+  await page.click('.tab[data-tab="tab"]');
+  await page.waitForSelector('#tabview.active');
+  await page.waitForSelector('#tab-list .row');
+  assert.match(await page.locator('#tab-title').textContent(), /Tab, Sat, Sep 5/);
+  assert.match(await page.locator('#tab-summary').textContent(), /2 open lines today, \$4\. 2 wrong PINs today\./);
+  const rows = await page.locator('#tab-list .row').allTextContents();
+  assert.equal(rows.length, 2);
+  assert.match(rows[0], /Dan Kim.*Hydration \$3.*staff/);
+  assert.match(rows[1], /Dan Kim.*Water \$1/);
+  assert.match(await page.locator('#tab-activity').textContent(), /Dan Kim.*locked/);
+  await page.screenshot({ path: join(OUT, 'staff-tab.png') });
+
+  await page.click('#tab-list .row:has-text("Hydration") .remove');
+  assert.equal(await page.locator('#tab-list .row:has-text("Hydration") .remove').textContent(), 'Confirm remove');
+  await page.click('#tab-list .row:has-text("Hydration") .remove');
+  await page.waitForFunction(() => /1 open line today, \$1\./.test(document.getElementById('tab-summary').textContent));
+  assert.match((await page.locator('#tab-list .row').allTextContents())[0], /Hydration.*removed/);
+  assert.equal(env.DB.raw.prepare("SELECT status FROM purchases WHERE item_key = 'hydration'").get().status, 'voided');
+
+  await page.click('#tab-activity .remove');
+  await page.waitForFunction(() => document.getElementById('tab-activity').children.length === 0);
+  assert.equal(env.DB.raw.prepare("SELECT locked_until FROM purchase_pins WHERE payer_contact_id = 'c_dan'").get().locked_until, null);
+});
+
+await step('member screen: the tab section, and Set up PIN hands over a setup link', async () => {
+  await page.click('.tab[data-tab="members"]');
+  await page.fill('#member-search', 'dan');
+  await page.waitForSelector('#member-tiles .tile');
+  await page.click('#member-tiles .tile:has-text("Dan Kim")');
+  await page.waitForSelector('#member.active');
+  await page.waitForFunction(() => document.getElementById('member-tab').style.display !== 'none');
+  assert.match(await page.locator('#member-tab-total').textContent(), /1 open, \$1/);
+  assert.match(await page.locator('#member-tab-actions').textContent(), /Purchase PIN set/);
+  const lines = await page.locator('#member-tab-list .row').allTextContents();
+  assert.equal(lines.length, 2);
+  assert.match(lines[0], /Hydration \$3.*removed/);
+  assert.match(lines[1], /Water \$1/);
+
+  await page.click('#member-pin-setup');
+  await page.waitForSelector('#member-pin-link');
+  const href = await page.locator('#member-pin-link').getAttribute('href');
+  assert.match(href, /^https:\/\/checkin\.bttbridgewater\.com\/pin\?t=[0-9a-f]{64}$/);
+  assert.equal(env.DB.raw.prepare("SELECT via FROM pin_setup_tokens WHERE payer_contact_id = 'c_dan' ORDER BY created_at DESC LIMIT 1").get().via, 'staff');
+  await page.screenshot({ path: join(OUT, 'staff-member-tab.png') });
+
+  // A kid: the section shows but says not eligible, no setup button.
+  await page.click('#member-back');
+  await page.fill('#member-search', 'jack');
+  await page.waitForSelector('#member-tiles .tile');
+  await page.click('#member-tiles .tile:has-text("Jack Silva")');
+  await page.waitForSelector('#member.active');
+  await page.waitForFunction(() => /not eligible/.test(document.getElementById('member-tab-actions').textContent));
+  assert.equal(await page.locator('#member-pin-setup').count(), 0);
 });
 
 await step('sign out returns to the login page', async () => {

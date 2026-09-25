@@ -53,3 +53,31 @@ export function localParts(date, tz) {
 export function pad(n) {
   return String(n).padStart(2, '0');
 }
+
+/**
+ * The UTC instant of a wall-clock time in `tz`. Two passes handle the hour
+ * around a DST change. A wall time that does not exist (the spring-forward
+ * hour) lands an hour to one side; callers here only ever ask for 00:00,
+ * which always exists in America/New_York.
+ */
+export function utcFromLocal(dateStr, timeStr, tz) {
+  const [y, mo, d] = dateStr.split('-').map(Number);
+  const [h, mi] = timeStr.split(':').map(Number);
+  const wanted = Date.UTC(y, mo - 1, d, h, mi);
+  let guess = wanted;
+  for (let i = 0; i < 2; i += 1) {
+    const p = localParts(new Date(guess), tz);
+    const seen = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute);
+    guess += wanted - seen;
+  }
+  return new Date(guess);
+}
+
+/** [start, end) of a local calendar day as ISO UTC strings. */
+export function localDayBounds(dateStr, tz) {
+  const start = utcFromLocal(dateStr, '00:00', tz);
+  const next = new Date(Date.UTC(...dateStr.split('-').map(Number).map((n, i) => (i === 1 ? n - 1 : n))));
+  next.setUTCDate(next.getUTCDate() + 1);
+  const end = utcFromLocal(`${next.getUTCFullYear()}-${pad(next.getUTCMonth() + 1)}-${pad(next.getUTCDate())}`, '00:00', tz);
+  return { startIso: start.toISOString(), endIso: end.toISOString() };
+}

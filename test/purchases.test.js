@@ -188,3 +188,87 @@ test('purchase is 404 when the tab is off or its migration is pending', async ()
     assert.equal((await call('/api/tab/purchase', { method: 'POST', body: { contactId: await id('c_dan'), item: 'water', pin: '1234' } })).status, 404);
   }
 });
+
+// ---------- staff routes (step 5) ----------
+
+async function staffSetup(opts = {}) {
+  const s = await setup(opts);
+  const staff = (path, o = {}) => s.call(path, { ...o, headers: { 'x-staff-pin': '1234', ...(o.headers || {}) } });
+  return { ...s, staff };
+}
+
+test("staff today: the day's lines with names and prices, PIN activity, and a total of what is open", async () => {
+  const { env, staff, id } = await staffSetup();
+  const cfg = tabConfig(env, ITEMS);
+  await recordPurchase(env, cfg, { buyerId: 'c_dan', payerId: 'c_dan', itemKey: 'water', method: 'kiosk', now: at(-60_000) });
+  const h = await recordPurchase(env, cfg, { buyerId: 'c_maria', payerId: 'c_maria', itemKey: 'hydration', method: 'staff', now: NOW });
+  await recordPurchase(env, cfg, { buyerId: 'c_dan', payerId: 'c_dan', itemKey: 'water', method: 'kiosk', now: at(-86_400_000) }); // yesterday
+  await givePin(env, 'c_dan');
+  for (let i = 0; i < LOCK_AFTER; i += 1) await verifyPin(env, 'c_dan', '0000', at(i * 1000));
+
+  assert.equal((await setup().then((s) => s.call('/api/staff/tab/today'))).status, 401);
+  const res = await staff('/api/staff/tab/today');
+  assert.equal(res.status, 200);
+  const d = await res.json();
+  assert.equal(d.enabled, true);
+  assert.equal(d.date, '2026-09-24');
+  assert.deepEqual(d.purchases.map((p) => [p.first, p.label, p.price, p.method, p.status]), [['María', 'Hydration', '$3', 'staff', 'open'], ['Dan', 'Water', '$1', 'kiosk', 'open']]);
+  assert.equal(d.purchases[0].id, await id('c_maria'), 'opaque id, never the GHL id');
+  assert.ok(!('buyerId' in d.purchases[0]) && !('payerId' in d.purchases[0]));
+  assert.equal(d.openCents, 400);
+  assert.equal(d.openTotal, '$4');
+  assert.equal(d.activity.failedToday, 5);
+  assert.deepEqual(d.activity.locked.map((l) => l.first), ['Dan']);
+
+  const yesterday = await (await staff('/api/staff/tab/today?date=2026-09-23')).json();
+  assert.deepEqual(yesterday.purchases.map((p) => p.first), ['Dan']);
+  assert.equal((await staff('/api/staff/tab/today?date=nope')).status, 400);
+
+  // Void one and the total drops; a second void changes nothing.
+  const v = await (await staff('/api/staff/tab/void', { method: 'POST', body: { purchaseId: h.purchaseId } })).json();
+  assert.equal(v.changed, 1);
+  const after = await (await staff('/api/staff/tab/today')).json();
+  assert.equal(after.openTotal, '$1');
+  assert.equal(after.purchases[0].status, 'voided');
+  assert.equal((await (await staff('/api/staff/tab/void', { method: 'POST', body: { purchaseId: h.purchaseId } })).json()).changed, 0);
+});
+
+test('staff today when the tab is off or pending says why, and the write routes are 404', async () => {
+  const off = await staffSetup({ tabOn: false });
+  assert.deepEqual(await (await off.staff('/api/staff/tab/today')).json(), { enabled: false, pendingMigration: false, error: null });
+  assert.equal((await off.staff('/api/staff/tab/void', { method: 'POST', body: { purchaseId: 1 } })).status, 404);
+  const pending = await staffSetup({ noTab: true });
+  assert.deepEqual(await (await pending.staff('/api/staff/tab/today')).json(), { enabled: false, pendingMigration: true, error: null });
+});
+
+test('member lookup carries the tab: open lines, history, PIN state, eligibility, and the no-card flag with its clear', async () => {
+  const { env, staff, id } = await staffSetup();
+  const cfg = tabConfig(env, ITEMS);
+  await recordPurchase(env, cfg, { buyerId: 'c_dan', payerId: 'c_dan', itemKey: 'water', method: 'kiosk', now: at(-60_000) });
+  const dan = await id('c_dan');
+  let d = await (await staff(`/api/staff/member?id=${dan}`)).json();
+  assert.equal(d.tab.enabled, true);
+  assert.equal(d.tab.eligible, true);
+  assert.deepEqual(d.tab.pin, { hasPin: false, locked: false, lockedUntil: null });
+  assert.deepEqual(d.tab.open.map((p) => [p.label, p.price]), [['Water', '$1']]);
+  assert.equal(d.tab.openCents, 100);
+  assert.equal(d.tab.noCard, false);
+  assert.ok(!('buyerId' in d.tab.open[0]));
+
+  env.DB.raw.prepare("INSERT INTO tab_flags VALUES ('c_dan', '2026-09-20T00:00:00Z')").run();
+  d = await (await staff(`/api/staff/member?id=${dan}`)).json();
+  assert.equal(d.tab.noCard, true);
+  assert.equal(d.tab.eligible, false, 'flagged: no drink row until cleared');
+  assert.deepEqual(await (await staff('/api/staff/tab/clear-no-card', { method: 'POST', body: { contactId: dan } })).json(), { ok: true, cleared: true });
+  d = await (await staff(`/api/staff/member?id=${dan}`)).json();
+  assert.equal(d.tab.noCard, false);
+  assert.equal(d.tab.eligible, true);
+
+  const kid = await (await staff(`/api/staff/member?id=${await id('c_jack')}`)).json();
+  assert.equal(kid.tab.eligible, false);
+  assert.deepEqual(kid.tab.open, []);
+
+  const off = await staffSetup({ tabOn: false });
+  const plain = await (await off.staff(`/api/staff/member?id=${await off.id('c_dan')}`)).json();
+  assert.deepEqual(plain.tab, { enabled: false });
+});

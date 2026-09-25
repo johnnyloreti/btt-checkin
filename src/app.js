@@ -8,7 +8,7 @@ import { notifyWaiverCheckin, waiverEnabled, logWaiverFailure } from './waiver.j
 import { hasWaiverColumn, hasPromotionsTable, hasTabTables } from './schema-caps.js';
 import { tabConfig, canBuy } from './tab.js';
 import { createSetupToken, readSetupToken, completeSetup, clearLockout, pinActivity, writePinLink, requirePepper } from './pin.js';
-import { hasNoCardFlag, recordPurchase } from './purchases.js';
+import { hasNoCardFlag, recordPurchase, purchasesBetween, voidPurchase, memberTab, clearNoCardFlag } from './purchases.js';
 import { verifyPin, pinStatus } from './pin.js';
 import { formatCents } from './tab.js';
 import { logSyncRow } from './synclog.js';
@@ -20,7 +20,7 @@ import { matchClasses, windowFromEnv } from './classes.js';
 import { allowRequest, PUBLIC, LOGIN } from './ratelimit.js';
 import { recordCheckin } from './checkin.js';
 import { today, classRoster, voidAttendance, memberHistory } from './staff.js';
-import { localParts } from './time.js';
+import { localParts, localDayBounds } from './time.js';
 
 /** Static files the Worker will hand to the assets binding. Everything else is 404. */
 const PUBLIC_ASSETS = new Set(['/', '/index.html', '/search.js', '/logo.png', '/waiver-qr.png', '/favicon.ico', '/pin', '/pin.html']);
@@ -442,14 +442,64 @@ export function createApp(schedule, deps = defaultDeps(), opts = {}) {
             const member = await resolveMember(env, url.searchParams.get('id'));
             if (!member) return json({ error: 'unknown member' }, 404);
             const history = await memberHistory(env, schedule, member.ghl_contact_id, now());
-            return json({ ...history, promotions: await promotionHistory(env, member.ghl_contact_id) });
+            const cfg = await tabReady(env);
+            const tab = cfg
+              ? { enabled: true, ...(await memberTab(env, cfg, member.ghl_contact_id)), pin: await pinStatus(env, member.ghl_contact_id, now()), eligible: await buyer(env, cfg, member) }
+              : { enabled: false };
+            if (tab.enabled) {
+              for (const r of [...tab.open, ...tab.recent]) { delete r.buyerId; delete r.payerId; r.price = formatCents(r.amountCents); }
+            }
+            return json({ ...history, promotions: await promotionHistory(env, member.ghl_contact_id), tab });
           }
 
           // ---- drink tab, staff (§15.3) ----
           if (path.startsWith('/api/staff/tab/')) {
             const cfg = await tabReady(env);
-            if (!cfg) return json({ error: 'drink tab is off' }, 404);
             const at = now();
+
+            // The day's tab plus PIN activity. Answers even when the tab is
+            // off, so the page can say why it is empty.
+            if (method === 'GET' && path === '/api/staff/tab/today') {
+              if (!cfg) {
+                const plain = tabConfig(env, tabItems);
+                return json({ enabled: false, pendingMigration: plain.enabled && !(await hasTabTables(env)), error: plain.error });
+              }
+              const salt = requireSalt(env);
+              const day = url.searchParams.get('date') || localParts(at, env.TZ || tz).date;
+              if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return json({ error: 'date must be YYYY-MM-DD' }, 400);
+              const { startIso, endIso } = localDayBounds(day, env.TZ || tz);
+              const rows = [];
+              for (const r of await purchasesBetween(env, cfg, startIso, endIso)) {
+                const { buyerId, payerId, ...rest } = r;
+                rows.push({ ...rest, id: await opaqueId(buyerId, salt), price: formatCents(r.amountCents) });
+              }
+              const a = await pinActivity(env, startIso, at);
+              const locked = [];
+              for (const l of a.locked) {
+                const m = await env.DB.prepare('SELECT first_name, last_name FROM members WHERE ghl_contact_id = ?').bind(l.contactId).first();
+                locked.push({ id: await opaqueId(l.contactId, salt), first: m ? m.first_name : '', last: m ? m.last_name : '', lockedUntil: l.lockedUntil });
+              }
+              const open = rows.filter((r) => r.status === 'open');
+              return json({
+                enabled: true, date: day, timezone: env.TZ || tz,
+                purchases: rows, openCents: open.reduce((n, r) => n + r.amountCents, 0), openTotal: formatCents(open.reduce((n, r) => n + r.amountCents, 0)),
+                activity: { failedToday: a.failed, locked },
+              });
+            }
+            if (!cfg) return json({ error: 'drink tab is off' }, 404);
+
+            if (method === 'POST' && path === '/api/staff/tab/void') {
+              const body = await readJson(request);
+              if (!body) return json({ error: 'expected JSON body' }, 400);
+              return json(await voidPurchase(env, body.purchaseId));
+            }
+            if (method === 'POST' && path === '/api/staff/tab/clear-no-card') {
+              const body = await readJson(request);
+              if (!body) return json({ error: 'expected JSON body' }, 400);
+              const member = await resolveMember(env, body.contactId);
+              if (!member) return json({ error: 'unknown member' }, 404);
+              return json(await clearNoCardFlag(env, member.ghl_contact_id));
+            }
 
             // Open the setup screen for a member at the desk. They type the
             // PIN themselves; staff never do.
@@ -472,10 +522,7 @@ export function createApp(schedule, deps = defaultDeps(), opts = {}) {
             if (method === 'GET' && path === '/api/staff/tab/activity') {
               const salt = requireSalt(env);
               const day = localParts(at, env.TZ || tz).date;
-              const dayStart = new Date(`${day}T00:00:00Z`);
-              // Midnight ET is 04:00Z or 05:00Z; a 5-hour reach back covers both.
-              dayStart.setUTCHours(dayStart.getUTCHours() + 5);
-              const a = await pinActivity(env, dayStart.toISOString(), at);
+              const a = await pinActivity(env, localDayBounds(day, env.TZ || tz).startIso, at);
               const locked = [];
               for (const l of a.locked) {
                 const m = await env.DB.prepare('SELECT first_name, last_name FROM members WHERE ghl_contact_id = ?').bind(l.contactId).first();
