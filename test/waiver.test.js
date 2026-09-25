@@ -130,6 +130,39 @@ test('notifyWaiverCheckin writes the one field, and never throws', async () => {
   resetFieldCache();
 });
 
+test('a nudge that fails is written to sync_log and counted on /health', async () => {
+  resetFallback();
+  resetFieldCache();
+  const DB = memoryD1();
+  const env = { MEMBER_TAGS: 'founding-member', MEMBER_TAG_PREFIXES: 'foundations-', STAFF_PIN: '1234', ID_SALT: SALT, TZ: 'America/New_York', WAIVER_TAG: 'waiver-signed', WAIVER_FIELD: 'checkin_last_at', DB };
+  await syncRoster(env, schedule, { fetchContacts: async () => ({ contacts: WITH_WAIVERS, pages: 1 }), now: new Date(SAT_1055.getTime() - 3600_000) });
+  const app = createApp(schedule, {
+    runRosterSync: async () => ({ outcome: 'ok' }),
+    notifyWaiver: async () => ({ ok: false, reason: 'custom field checkin_last_at not found in GHL' }),
+    now: () => SAT_1055,
+  });
+  const waited = [];
+  const ctx = { waitUntil: (p) => waited.push(p) };
+  const res = await app.fetch(
+    new Request('https://x.test/api/checkin', { method: 'POST', headers: { 'content-type': 'application/json', 'cf-connecting-ip': '10.0.0.1' }, body: JSON.stringify({ contactId: await opaqueId('c_emma', SALT), className: 'Kids 6-9', classStartLocal: '2026-09-05T11:00' }) }),
+    env,
+    ctx,
+  );
+  assert.equal(res.status, 200, 'the check-in itself is untouched');
+  await Promise.all(waited);
+  const rows = DB.raw.prepare("SELECT ran_at, outcome, detail FROM sync_log WHERE job = 'waiver'").all();
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].outcome, 'failed');
+  assert.equal(rows[0].ran_at, SAT_1055.toISOString());
+  const detail = JSON.parse(rows[0].detail);
+  assert.equal(detail.contactId, 'c_emma');
+  assert.match(detail.reason, /checkin_last_at not found/);
+
+  const h = await (await app.fetch(new Request('https://x.test/health'), env, ctx)).json();
+  assert.equal(h.waiverFailures24h, 1);
+  assert.match(h.waiverLastFailure, /checkin_last_at not found/);
+});
+
 test('kiosk page carries the waiver line and the QR slot', () => {
   const html = readRepoFile('public/index.html');
   assert.match(html, /One thing before class: sign the waiver/);

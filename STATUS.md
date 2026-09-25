@@ -73,6 +73,17 @@ Fixed by applying the migration. Hardened so it cannot repeat or hide:
 
 If the footer ever shows a stuck queue again: check `/health` first. `schemaCurrent: false` means a migration is pending.
 
+## Incident, 2026-09-25: waiver reminders never went out
+
+The Worker side of §15.1 has been writing `checkin_last_at` since 2026-09-17. The GHL side was never finished: no such field existed in the sub-account until the btt-ops session created it on 2026-09-25, and there was no workflow. Every nudge failed with "custom field checkin_last_at not found in GHL", the caller only logged it to the console, and nothing on `/health` moved. The on-screen QR worked the whole time; the text reminder never existed.
+
+What changed:
+- `src/fields.js` holds the list of every custom field the Worker writes. The roster sync checks that list against GHL every run (one extra read per hour, cached) and goes `degraded` naming any that are missing. `/health` shows `missingFields` and goes `ok: false` while any are missing, with "Writes to them are being lost" in the error. Had this existed on 2026-09-17 it would have gone red within the hour.
+- A nudge that fails is written to `sync_log` as `job = 'waiver'`. `/health` shows `waiverFailures24h` and `waiverLastFailure`. These do not flip `ok`, same as a rollup outcome; they are there to be read.
+- The GHL workflow "Check-In: Waiver reminder" is being built on the btt-ops side (fires on the field changing, skips `waiver-signed`, at most one reminder every 3 days via a `waiver-reminder-sent` tag).
+
+Known gap: the field is written on the kid's contact, which often has no phone or email. The fix is §15.3 Phase 1b's `payer_contact_id`; until then, kids' reminders reach nobody.
+
 ## V2: stripe tracking (§15.2)
 
 Built 2026-09-23. Kids programs, 7 classes per stripe. Needs, in this order:
@@ -193,7 +204,7 @@ Expect `outcome: ok` and `pushed: 1`. Open your contact in GHL and check the cus
 
 ## Operating it
 
-- `/health` shows the last roster sync, the last rollup, their outcomes, and how many contacts are waiting for a rollup.
+- `/health` shows the last roster sync, the last rollup, their outcomes, how many contacts are waiting for a rollup, `missingFields` (custom fields the Worker writes that GHL does not have; `ok` goes false while any are listed), and `waiverFailures24h` with the latest reason.
 - Outcomes mean: `ok` the job ran and did its work; `degraded` it ran but something was off (zero members, a missing field, a failed contact) and the detail says what; `failed` it could not do its job and touched nothing.
 - To read the log:
 ```

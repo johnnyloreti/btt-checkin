@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { classifyContact, buildRoster, rosterConfig, parseList, syncRoster, tidyName } from '../src/roster.js';
+import { FIELD_KEYS, resetFieldCache } from '../src/rollup.js';
+import { requiredFieldKeys } from '../src/fields.js';
 import { loadSchedule } from '../src/schedule.js';
 import { readRepoFile } from './helpers.js';
 import { memoryD1 } from './d1.js';
@@ -132,6 +134,76 @@ test('syncRoster writes members, logs ok with flagged names', async () => {
   assert.match(log[0].detail, /Sam Untagged/);
 });
 
+test('the sync checks every field the Worker writes, and says when it did not', async () => {
+  resetFieldCache();
+  const env = { ...ENV, WAIVER_TAG: 'waiver-signed', WAIVER_FIELD: 'checkin_last_at', DB: memoryD1() };
+  const all = new Map([...FIELD_KEYS.map((k, i) => [k, `id_${i}`]), ['checkin_last_at', 'id_ck']]);
+  let fetches = 0;
+  const ok = await syncRoster(env, schedule, { fetchContacts: async () => ({ contacts: CONTACTS, pages: 1 }), fetchFields: async () => (fetches += 1, all), now: NOW });
+  assert.equal(ok.outcome, 'ok');
+  assert.deepEqual(ok.missingFields, []);
+  assert.equal(fetches, 1);
+
+  // Second run inside the hour uses the cached map: no second read of GHL.
+  const again = await syncRoster(env, schedule, { fetchContacts: async () => ({ contacts: CONTACTS, pages: 1 }), fetchFields: async () => (fetches += 1, all), now: new Date(NOW.getTime() + 60_000) });
+  assert.equal(again.outcome, 'ok');
+  assert.equal(fetches, 1);
+
+  // Without the dep, the check is reported as skipped, never as passed.
+  const skipped = await syncRoster(env, schedule, { fetchContacts: async () => ({ contacts: CONTACTS, pages: 1 }), now: new Date(NOW.getTime() + 120_000) });
+  assert.equal(skipped.outcome, 'ok');
+  assert.equal(skipped.missingFields, null);
+  assert.equal(skipped.fieldCheck, 'skipped');
+  resetFieldCache();
+});
+
+test('a field the Worker writes that GHL lacks makes the sync degraded, by name, and is re-read next run', async () => {
+  resetFieldCache();
+  const env = { ...ENV, WAIVER_TAG: 'waiver-signed', WAIVER_FIELD: 'checkin_last_at', DB: memoryD1() };
+  const withoutWaiver = new Map(FIELD_KEYS.map((k, i) => [k, `id_${i}`]));
+  let fetches = 0;
+  const r = await syncRoster(env, schedule, { fetchContacts: async () => ({ contacts: CONTACTS, pages: 1 }), fetchFields: async () => (fetches += 1, withoutWaiver), now: NOW });
+  assert.equal(r.outcome, 'degraded');
+  assert.equal(r.members, 9, 'the roster itself still synced');
+  assert.deepEqual(r.missingFields, ['checkin_last_at']);
+  const log = env.DB.raw.prepare("SELECT outcome, detail FROM sync_log WHERE job = 'roster'").get();
+  assert.equal(log.outcome, 'degraded');
+  assert.match(log.detail, /checkin_last_at/);
+
+  // The cache was dropped, so the next run re-reads GHL and clears as soon as the field exists.
+  const fixed = new Map([...withoutWaiver, ['checkin_last_at', 'id_ck']]);
+  const r2 = await syncRoster(env, schedule, { fetchContacts: async () => ({ contacts: CONTACTS, pages: 1 }), fetchFields: async () => (fetches += 1, fixed), now: new Date(NOW.getTime() + 60_000) });
+  assert.equal(fetches, 2);
+  assert.equal(r2.outcome, 'ok');
+  assert.deepEqual(r2.missingFields, []);
+
+  // With the waiver feature off, its field is not required.
+  resetFieldCache();
+  const off = await syncRoster({ ...env, WAIVER_TAG: '' }, schedule, { fetchContacts: async () => ({ contacts: CONTACTS, pages: 1 }), fetchFields: async () => withoutWaiver, now: new Date(NOW.getTime() + 120_000) });
+  assert.equal(off.outcome, 'ok');
+  assert.deepEqual(off.missingFields, []);
+
+  // A rollup field missing is caught the same way.
+  resetFieldCache();
+  const noWeek = new Map(fixed);
+  noWeek.delete('attendance_week');
+  const r3 = await syncRoster(env, schedule, { fetchContacts: async () => ({ contacts: CONTACTS, pages: 1 }), fetchFields: async () => noWeek, now: new Date(NOW.getTime() + 180_000) });
+  assert.equal(r3.outcome, 'degraded');
+  assert.deepEqual(r3.missingFields, ['attendance_week']);
+  resetFieldCache();
+});
+
+test('if GHL cannot be read for the field check, the roster still syncs and the run is degraded with the reason', async () => {
+  resetFieldCache();
+  const env = { ...ENV, DB: memoryD1() };
+  const r = await syncRoster(env, schedule, { fetchContacts: async () => ({ contacts: CONTACTS, pages: 1 }), fetchFields: async () => { throw new Error('GHL 503'); }, now: NOW });
+  assert.equal(r.outcome, 'degraded');
+  assert.equal(r.members, 9);
+  assert.equal(r.missingFields, null);
+  assert.match(r.fieldCheck, /GHL 503/);
+  assert.equal(env.DB.raw.prepare('SELECT COUNT(*) AS n FROM members').get().n, 9);
+});
+
 test('a contact that loses its member tags goes inactive, never deleted', async () => {
   const DB = memoryD1();
   const env = { ...ENV, DB };
@@ -253,4 +325,10 @@ test('tagging a synced parent program:none removes their row; attendance stays',
   // Third sync, same tags: nothing to remove, still quiet.
   r = await syncRoster(env, schedule, { fetchContacts: async () => ({ contacts: CONTACTS, pages: 1 }), now: new Date(NOW.getTime() + 120_000) });
   assert.equal(r.removed, 0);
+});
+
+test('requiredFieldKeys is the five rollup fields plus the waiver field when that feature is on', () => {
+  assert.deepEqual(requiredFieldKeys({}), FIELD_KEYS);
+  assert.deepEqual(requiredFieldKeys({ WAIVER_TAG: 'waiver-signed', WAIVER_FIELD: ' Checkin_Last_At ' }), [...FIELD_KEYS, 'checkin_last_at']);
+  assert.deepEqual(requiredFieldKeys({ WAIVER_TAG: '', WAIVER_FIELD: 'checkin_last_at' }), FIELD_KEYS);
 });

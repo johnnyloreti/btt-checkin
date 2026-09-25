@@ -401,6 +401,11 @@ So, for any migration from here on:
 - **`/health` reports `schemaCurrent`** and goes `ok: false` with the migration filename when a column is missing. A half-applied deploy is visible.
 - Apply the migration before the deploy that needs it, but the deploy must survive the other order.
 
+**Field rule, learned 2026-09-25.** The GHL side of this feature was never finished: the sub-account had no `checkin_last_at` field until 2026-09-25, so for weeks every nudge wrote to a field that did not exist. `notifyWaiverCheckin` reported it and the caller only `console.warn`ed, so nothing surfaced. Fixed the same day:
+- `src/fields.js` lists every custom field the Worker writes (`requiredFieldKeys`). **Any new field the Worker writes is added there.** The roster sync checks the list every run and goes `degraded` naming what is missing; `/health` shows `missingFields` and goes `ok: false` while any are missing.
+- A nudge that does not land is written to `sync_log` (`job = 'waiver'`), and `/health` reports `waiverFailures24h` and `waiverLastFailure`.
+- Kids: the field is written on the kid's contact, which often has no phone or email for the reminder to reach. §15.3 Phase 1b's `payer_contact_id` is the fix (send to the payer instead). Not built yet.
+
 ### 15.2 Stripe tracking (approved 2026-09-23)
 
 Staff need to know who is due to be looked at for a stripe. Johnny: "start with kids, 7 classes per stripe."

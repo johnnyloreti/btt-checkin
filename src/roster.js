@@ -2,6 +2,7 @@
 // Rules from §6. Pure functions first, then the sync that touches D1.
 
 import { hasWaiverColumn } from './schema-caps.js';
+import { checkRequiredFields } from './fields.js';
 
 /**
  * A contact with this tag is a paying family member who does not train:
@@ -142,6 +143,14 @@ async function logSync(db, job, ranAt, outcome, detail) {
  * Run one roster sync. Never throws; every path writes a sync_log row.
  *
  * deps.fetchContacts: () => Promise<{ contacts, pages }>
+ * deps.fetchFields:   () => Promise<Map<key, id>>, optional. When given, the
+ *                     run also checks that every custom field the Worker
+ *                     writes exists in GHL (fields.js) and goes degraded
+ *                     naming any that are missing. Production always passes
+ *                     it; a missing field is otherwise invisible.
+ * deps.now: Date
+ *
+ * deps.fetchContacts: () => Promise<{ contacts, pages }>
  * deps.now: Date
  *
  * Outcomes:
@@ -225,8 +234,27 @@ export async function syncRoster(env, schedule, deps) {
       waiverMissing: cfg.waiverTag ? members.filter((m) => !m.waiver).length : null,
       flagged: flagged.map((f) => `${f.name}: ${f.reason}`),
     };
-    await logSync(db, 'roster', ranAt, 'ok', detail);
-    return { outcome: 'ok', ...detail };
+
+    // Every field the Worker writes must exist, or the writes land on
+    // nothing. Checked here because this job already runs every 30 minutes.
+    // Not checking is reported as such, never as ok (§0.6).
+    let outcome = 'ok';
+    if (deps.fetchFields) {
+      try {
+        const { missing } = await checkRequiredFields(env, deps.fetchFields, now);
+        detail.missingFields = missing;
+        if (missing.length) outcome = 'degraded';
+      } catch (e) {
+        detail.missingFields = null;
+        detail.fieldCheck = `error: ${String(e && e.message ? e.message : e)}`;
+        outcome = 'degraded';
+      }
+    } else {
+      detail.missingFields = null;
+      detail.fieldCheck = 'skipped';
+    }
+    await logSync(db, 'roster', ranAt, outcome, detail);
+    return { outcome, ...detail };
   } catch (e) {
     const detail = { error: `d1: ${String(e && e.message ? e.message : e)}` };
     await logSync(db, 'roster', ranAt, 'failed', detail).catch(() => {});

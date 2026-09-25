@@ -4,7 +4,7 @@
 import { syncRoster } from './roster.js';
 import { fetchAllContacts, fetchCustomFieldIds, ghlPutContactCustomFields } from './ghl.js';
 import { runRollup } from './rollup.js';
-import { notifyWaiverCheckin, waiverEnabled } from './waiver.js';
+import { notifyWaiverCheckin, waiverEnabled, logWaiverFailure } from './waiver.js';
 import { hasWaiverColumn } from './schema-caps.js';
 import { stripeCandidates, recordPromotion, undoLastPromotion, promotionHistory, stripesEnabled } from './promotions.js';
 import { isStaff, pinMatches, issueToken, cookieHeader, SESSION_MS } from './staff-auth.js';
@@ -29,7 +29,7 @@ export function json(body, status = 200, headers = {}) {
  * Health snapshot. `ok` means every check ran and returned; it never means
  * "nothing came back" (§0.6). A D1 error makes ok=false with the message.
  */
-export async function health(env, schedule) {
+export async function health(env, schedule, now = new Date()) {
   const out = {
     ok: true,
     lastRosterSync: null,
@@ -38,24 +38,51 @@ export async function health(env, schedule) {
     lastRollup: null,
     lastRollupOutcome: null,
     pendingRollups: null,
+    missingFields: null,
+    waiverFailures24h: null,
+    waiverLastFailure: null,
     schemaCurrent: null,
     schedulePresent: Boolean(schedule && Array.isArray(schedule.classes) && schedule.classes.length > 0),
   };
   try {
-    const [count, last, rollup, pending] = await Promise.all([
+    const dayAgo = new Date(now.getTime() - 24 * 3600_000).toISOString();
+    const [count, last, rollup, pending, waiverFails, waiverLast] = await Promise.all([
       env.DB.prepare('SELECT COUNT(*) AS n FROM members WHERE active = 1').first(),
       env.DB.prepare(
-        "SELECT ran_at, outcome FROM sync_log WHERE job = 'roster' ORDER BY ran_at DESC, id DESC LIMIT 1",
+        "SELECT ran_at, outcome, detail FROM sync_log WHERE job = 'roster' ORDER BY ran_at DESC, id DESC LIMIT 1",
       ).first(),
       env.DB.prepare(
         "SELECT ran_at, outcome FROM sync_log WHERE job = 'rollup' ORDER BY ran_at DESC, id DESC LIMIT 1",
       ).first(),
       env.DB.prepare('SELECT COUNT(*) AS n FROM pending_rollups').first(),
+      env.DB.prepare("SELECT COUNT(*) AS n FROM sync_log WHERE job = 'waiver' AND ran_at >= ?").bind(dayAgo).first(),
+      env.DB.prepare("SELECT ran_at, detail FROM sync_log WHERE job = 'waiver' ORDER BY ran_at DESC, id DESC LIMIT 1").first(),
     ]);
     out.memberCount = count ? Number(count.n) : 0;
     if (last) {
       out.lastRosterSync = last.ran_at;
       out.lastRosterOutcome = last.outcome;
+      // Custom fields the Worker writes that GHL does not have (fields.js).
+      // null means the last sync did not check, which is not the same as none.
+      try {
+        const detail = last.detail ? JSON.parse(last.detail) : {};
+        out.missingFields = Array.isArray(detail.missingFields) ? detail.missingFields : null;
+      } catch {
+        out.missingFields = null;
+      }
+      if (out.missingFields && out.missingFields.length) {
+        out.ok = false;
+        out.error = `GHL custom field(s) missing: ${out.missingFields.join(', ')}. Writes to them are being lost.`;
+      }
+    }
+    out.waiverFailures24h = waiverFails ? Number(waiverFails.n) : 0;
+    if (waiverLast && waiverLast.ran_at >= dayAgo) {
+      try {
+        const d = JSON.parse(waiverLast.detail || '{}');
+        out.waiverLastFailure = `${waiverLast.ran_at} ${d.reason || ''}`.trim();
+      } catch {
+        out.waiverLastFailure = waiverLast.ran_at;
+      }
     }
     if (rollup) {
       out.lastRollup = rollup.ran_at;
@@ -67,7 +94,7 @@ export async function health(env, schedule) {
     out.schemaCurrent = await hasWaiverColumn(env);
     if (!out.schemaCurrent) {
       out.ok = false;
-      out.error = 'members.waiver missing: run src/db/migrations/002_waiver.sql';
+      out.error = [out.error, 'members.waiver missing: run src/db/migrations/002_waiver.sql'].filter(Boolean).join(' | ');
     }
   } catch (e) {
     out.ok = false;
@@ -139,7 +166,7 @@ function asset(env, request, path) {
 export function defaultDeps() {
   return {
     runRosterSync: (env, schedule, now) =>
-      syncRoster(env, schedule, { fetchContacts: () => fetchAllContacts(env), now }),
+      syncRoster(env, schedule, { fetchContacts: () => fetchAllContacts(env), fetchFields: () => fetchCustomFieldIds(env), now }),
     runRollup: (env, schedule, now) =>
       runRollup(env, schedule, {
         fetchFields: () => fetchCustomFieldIds(env),
@@ -181,8 +208,12 @@ export function createApp(schedule, deps = defaultDeps()) {
     const waiverNeeded = waiverEnabled(env) && Number(member.waiver ?? 1) === 0;
     const body2 = { ...result.body, waiverNeeded };
     if (waiverNeeded && !result.body.duplicate && deps.notifyWaiver) {
-      const task = deps.notifyWaiver(env, member.ghl_contact_id, at).then((r) => {
-        if (!r.ok) console.warn(`waiver nudge skipped for ${member.ghl_contact_id}: ${r.reason}`);
+      const task = deps.notifyWaiver(env, member.ghl_contact_id, at).then(async (r) => {
+        if (r.ok) return;
+        // Recorded, not just warned: a nudge that did not land is a reminder
+        // that will not go out, and console.warn hid exactly this for weeks.
+        console.warn(`waiver nudge failed for ${member.ghl_contact_id}: ${r.reason}`);
+        await logWaiverFailure(env, member.ghl_contact_id, r.reason, at);
       });
       if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(task);
       else await task;
@@ -202,7 +233,7 @@ export function createApp(schedule, deps = defaultDeps()) {
         }
 
         if (method === 'GET' && path === '/health') {
-          const body = await health(env, schedule);
+          const body = await health(env, schedule, now());
           return json(body, body.ok ? 200 : 503);
         }
 
