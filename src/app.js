@@ -5,7 +5,8 @@ import { syncRoster } from './roster.js';
 import { fetchAllContacts, fetchCustomFieldIds, ghlPutContactCustomFields } from './ghl.js';
 import { runRollup } from './rollup.js';
 import { notifyWaiverCheckin, waiverEnabled, logWaiverFailure } from './waiver.js';
-import { hasWaiverColumn } from './schema-caps.js';
+import { hasWaiverColumn, hasPromotionsTable, hasTabTables } from './schema-caps.js';
+import { tabConfig } from './tab.js';
 import { stripeCandidates, recordPromotion, undoLastPromotion, promotionHistory, stripesEnabled } from './promotions.js';
 import { isStaff, pinMatches, issueToken, cookieHeader, SESSION_MS } from './staff-auth.js';
 import { buildIdMap, opaqueId, requireSalt } from './ids.js';
@@ -29,7 +30,7 @@ export function json(body, status = 200, headers = {}) {
  * Health snapshot. `ok` means every check ran and returned; it never means
  * "nothing came back" (§0.6). A D1 error makes ok=false with the message.
  */
-export async function health(env, schedule, now = new Date()) {
+export async function health(env, schedule, now = new Date(), opts = {}) {
   const out = {
     ok: true,
     lastRosterSync: null,
@@ -43,6 +44,7 @@ export async function health(env, schedule, now = new Date()) {
     waiverLastFailure: null,
     schemaCurrent: null,
     schedulePresent: Boolean(schedule && Array.isArray(schedule.classes) && schedule.classes.length > 0),
+    tab: null,
   };
   try {
     const dayAgo = new Date(now.getTime() - 24 * 3600_000).toISOString();
@@ -91,10 +93,19 @@ export async function health(env, schedule, now = new Date()) {
     out.pendingRollups = pending ? Number(pending.n) : 0;
     // A migration Johnny has not run yet. Surfaced here so a half-applied
     // deploy is visible rather than silent (see schema-caps.js).
-    out.schemaCurrent = await hasWaiverColumn(env);
-    if (!out.schemaCurrent) {
+    const problems = [];
+    if (!(await hasWaiverColumn(env))) problems.push('members.waiver missing: run src/db/migrations/002_waiver.sql');
+    if (stripesEnabled(env) && !(await hasPromotionsTable(env))) problems.push('promotions table missing: run src/db/migrations/003_promotions.sql');
+    // The tab (§15.3): off, on, or misconfigured, and whether its tables exist.
+    const tab = tabConfig(env, opts.tabItems || {});
+    const tabSchema = await hasTabTables(env);
+    out.tab = { enabled: tab.enabled, schema: tabSchema, error: tab.error };
+    if (tab.error) problems.push(tab.error);
+    if (tab.enabled && !tabSchema) problems.push('drink tab tables missing: run src/db/migrations/004_tab.sql');
+    out.schemaCurrent = problems.length === 0 || (problems.length === 1 && Boolean(tab.error));
+    if (problems.length) {
       out.ok = false;
-      out.error = [out.error, 'members.waiver missing: run src/db/migrations/002_waiver.sql'].filter(Boolean).join(' | ');
+      out.error = [out.error, ...problems].filter(Boolean).join(' | ');
     }
   } catch (e) {
     out.ok = false;
@@ -184,8 +195,9 @@ export function defaultDeps() {
   };
 }
 
-export function createApp(schedule, deps = defaultDeps()) {
+export function createApp(schedule, deps = defaultDeps(), opts = {}) {
   const tz = schedule.timezone;
+  const tabItems = opts.tabItems || {};
   const now = () => (deps.now ? deps.now() : new Date());
 
   async function checkin(env, body, method, ctx) {
@@ -233,7 +245,7 @@ export function createApp(schedule, deps = defaultDeps()) {
         }
 
         if (method === 'GET' && path === '/health') {
-          const body = await health(env, schedule, now());
+          const body = await health(env, schedule, now(), { tabItems });
           return json(body, body.ok ? 200 : 503);
         }
 

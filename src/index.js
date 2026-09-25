@@ -1,14 +1,17 @@
-// index.js — Worker entry. Validates schedule.json at module load so a bad
-// schedule fails the deploy, not a check-in.
+// index.js — Worker entry. Validates schedule.json and tab-items.json at
+// module load so a bad file fails the deploy, not a check-in.
 
 import scheduleJson from '../schedule.json';
+import tabItemsJson from '../tab-items.json';
 import { validateSchedule } from './schedule.js';
+import { validateTabItems } from './tab.js';
 import { createApp, defaultDeps } from './app.js';
 import { jobsForCron } from './cron.js';
 
 const schedule = validateSchedule(scheduleJson);
+const tabItems = validateTabItems(tabItemsJson);
 const deps = defaultDeps();
-const app = createApp(schedule, deps);
+const app = createApp(schedule, deps, { tabItems });
 
 export default {
   fetch(request, env, ctx) {

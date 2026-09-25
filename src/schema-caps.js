@@ -13,6 +13,10 @@
 const UNKNOWN = null;
 let waiverColumn = UNKNOWN;
 let promotionsTable = UNKNOWN;
+let tabTables = UNKNOWN;
+
+/** The seven tables migration 004 creates (§15.3). All or nothing. */
+export const TAB_TABLES = ['purchase_pins', 'pin_setup_tokens', 'pin_failures', 'purchases', 'closeouts', 'closeout_payers', 'tab_flags'];
 
 /** True when members.waiver exists. Cached per isolate; one query at most. */
 export async function hasWaiverColumn(env) {
@@ -42,8 +46,24 @@ export async function hasPromotionsTable(env) {
   return promotionsTable;
 }
 
+/** True when every drink-tab table exists (§15.3). Cached per isolate. */
+export async function hasTabTables(env) {
+  if (tabTables !== UNKNOWN) return tabTables;
+  try {
+    const marks = TAB_TABLES.map(() => '?').join(', ');
+    const { results } = await env.DB.prepare(
+      `SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (${marks})`,
+    ).bind(...TAB_TABLES).all();
+    tabTables = results.length === TAB_TABLES.length;
+  } catch {
+    tabTables = false;
+  }
+  return tabTables;
+}
+
 /** Test hook, and a way to re-check after a migration without a redeploy. */
 export function resetSchemaCaps() {
   waiverColumn = UNKNOWN;
   promotionsTable = UNKNOWN;
+  tabTables = UNKNOWN;
 }

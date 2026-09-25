@@ -5,7 +5,7 @@
 
 import { DatabaseSync } from 'node:sqlite';
 import { readRepoFile } from './helpers.js';
-import { resetSchemaCaps } from '../src/schema-caps.js';
+import { resetSchemaCaps, TAB_TABLES } from '../src/schema-caps.js';
 
 const SCHEMA = readRepoFile('src/db/schema.sql');
 
@@ -13,16 +13,18 @@ const SCHEMA = readRepoFile('src/db/schema.sql');
  * A database as it stood before a pending migration:
  *   legacy: true        members without the waiver column (002)
  *   noPromotions: true  no promotions table (003)
+ *   noTab: true         none of the drink-tab tables (004)
  *
  * Used to prove that a deploy running ahead of its migration degrades
  * instead of breaking.
  */
-export function memoryD1({ legacy = false, noPromotions = false } = {}) {
+export function memoryD1({ legacy = false, noPromotions = false, noTab = false } = {}) {
   resetSchemaCaps();
   const db = new DatabaseSync(':memory:');
   db.exec(SCHEMA);
   if (legacy) db.exec('ALTER TABLE members DROP COLUMN waiver');
   if (noPromotions) db.exec('DROP TABLE promotions');
+  if (noTab) for (const t of TAB_TABLES) db.exec(`DROP TABLE ${t}`);
 
   const isSelect = (sql) => /^\s*(select|with|pragma)\b/i.test(sql);
 

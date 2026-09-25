@@ -29,6 +29,18 @@ STAFF_BACKDATE_DAYS = "30"
 STRIPE_CLASSES = "7"
 STRIPE_PROGRAMS = "kids-3-5,kids-6-9,kids-10-14"
 
+# Drink tab (§15.3). Keys into tab-items.json; empty TAB_ITEMS turns the tab
+# off. TAB_PROGRAMS: a member buys only if every program they hold is listed
+# here (adults only in Phase 1; a kid in an adult class is excluded until 1b).
+# A payer is charged when their open tab reaches TAB_MIN_CENTS or their oldest
+# open purchase is TAB_MAX_ROLL_DAYS old. PUBLIC_ORIGIN is the host in the PIN
+# setup link texted to members; behind the Netlify proxy the Worker cannot see it.
+TAB_ITEMS = "water,hydration"
+TAB_PROGRAMS = "adult"
+TAB_MIN_CENTS = "500"
+TAB_MAX_ROLL_DAYS = "28"
+PUBLIC_ORIGIN = "https://checkin.bttbridgewater.com"
+
 # Waiver prompt (§15.1). The tag a signed waiver leaves on the student's
 # contact, and the custom field written at check-in when it is missing so a
 # GHL workflow can send the reminder. Empty WAIVER_TAG turns the feature off.

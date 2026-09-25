@@ -1,0 +1,4 @@
+{
+  "water":     { "label": "Water",     "product_id": "6ab637c780e11d5e52e6e16a", "price_id": "6ab637c8a45571af67f0ed40", "amount_cents": 100 },
+  "hydration": { "label": "Hydration", "product_id": "6ab637c875098f3f8f8ea591", "price_id": "6ab637c880e11d5e52e6e1a3", "amount_cents": 300 }
+}
