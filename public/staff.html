@@ -35,6 +35,10 @@
   .row .tag { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); border: 1px solid var(--line); padding: 3px 8px; border-radius: 999px; }
   .row .tag.warn { color: var(--gold); border-color: var(--gold); }
   .row .tag.gold { color: #1a1607; background: var(--gold); border-color: var(--gold); }
+  .row.sub { margin-left: 28px; padding: 10px 16px; font-size: 16px; background: transparent; }
+  .row .status { color: var(--muted); font-size: 15px; }
+  .row .status.gold { color: var(--gold); }
+  .btn.primary:disabled { opacity: .45; cursor: default; }
   .status a { color: var(--gold); }
   .row .check { color: var(--gold); font-weight: 700; }
   .row .remove { font: inherit; font-size: 14px; font-weight: 600; background: none; border: 1px solid var(--line); color: var(--muted); padding: 8px 12px; border-radius: 10px; cursor: pointer; }
@@ -115,8 +119,18 @@
       <button id="tab-next" type="button" aria-label="Next day">&#8250;</button>
     </div>
     <p class="note" id="tab-summary"></p>
+    <button class="btn" id="tab-closeout" type="button" style="display:none;margin:0 0 18px">Review and charge</button>
     <div id="tab-activity" class="list" style="margin-bottom:18px"></div>
     <div id="tab-list" class="list"></div>
+  </section>
+
+  <section id="closeout" class="view">
+    <button class="back" id="closeout-back" type="button">&#8249; Back to the tab</button>
+    <h2>Review and charge <span class="sub" id="closeout-sub"></span></h2>
+    <p class="note" id="closeout-note"></p>
+    <div id="closeout-list" class="list"></div>
+    <button class="btn primary" id="closeout-charge" type="button" style="display:none"></button>
+    <div id="closeout-progress" class="list" style="margin-top:18px"></div>
   </section>
 
   <section id="members" class="view">
@@ -214,7 +228,7 @@
   }
   function showView(id) {
     for (const v of document.querySelectorAll('.view')) v.classList.toggle('active', v.id === id);
-    const tab = id === 'tonight' || id === 'class' ? 'tonight' : id === 'stripes' ? 'stripes' : id === 'tabview' ? 'tab' : 'members';
+    const tab = id === 'tonight' || id === 'class' ? 'tonight' : id === 'stripes' ? 'stripes' : id === 'tabview' || id === 'closeout' ? 'tab' : 'members';
     for (const t of document.querySelectorAll('.tab[data-tab]')) t.classList.toggle('active', t.dataset.tab === tab);
     window.scrollTo(0, 0);
   }
@@ -582,10 +596,12 @@
     }
     if (!data.enabled) {
       $('tab-summary').textContent = '';
+      $('tab-closeout').style.display = 'none';
       list.appendChild(el('div', 'empty', data.pendingMigration ? 'The drink tab needs its database migration.' : data.error ? `The drink tab is misconfigured: ${data.error}` : 'The drink tab is off.'));
       return;
     }
     tabDate = data.date;
+    $('tab-closeout').style.display = '';
     $('tab-title').textContent = `Tab, ${fmtDate(data.date)}`;
     const open = data.purchases.filter((p) => p.status === 'open');
     $('tab-summary').textContent = `${open.length} open line${open.length === 1 ? '' : 's'} today, ${data.openTotal}. ${data.activity.failedToday} wrong PIN${data.activity.failedToday === 1 ? '' : 's'} today.`;
@@ -625,6 +641,163 @@
   }
   $('tab-prev').addEventListener('click', () => { if (tabDate) { tabDate = shiftDate(tabDate, -1); loadTab(); } });
   $('tab-next').addEventListener('click', () => { if (tabDate) { tabDate = shiftDate(tabDate, 1); loadTab(); } });
+
+  // ---------- close-out: review and charge ----------
+  // Card status and each charge are one payer per request, driven from here,
+  // so the Worker never needs more than a handful of GHL calls in one go.
+  let review = null;
+  const STATE_LABEL = {
+    pending: 'Waiting', schedule_created: 'Invoice created, not yet activated', autopay_on: 'Charging', paid: 'Paid',
+    paid_at_pos: 'Charged at POS', failed: 'Not paid, needs a look', skipped_no_card: 'No card on file', skipped_missing_contact: 'Missing contact details',
+  };
+  $('tab-closeout').addEventListener('click', async () => { showView('closeout'); await loadCloseout(); });
+  $('closeout-back').addEventListener('click', async () => { showView('tabview'); await loadTab(); });
+
+  async function loadCloseout() {
+    $('closeout-list').innerHTML = '';
+    $('closeout-progress').innerHTML = '';
+    $('closeout-charge').style.display = 'none';
+    $('closeout-note').textContent = '';
+    try {
+      review = await api('/api/staff/tab/review');
+    } catch (e) {
+      $('closeout-list').appendChild(el('div', 'empty', e.message));
+      return;
+    }
+    $('closeout-sub').textContent = `${review.minTotal} or ${review.maxRollDays} days`;
+    if (review.active) {
+      $('closeout-note').textContent = 'A close-out is still in progress. Finish it before starting another.';
+      renderProgress(review.active.payers);
+      await checkAll(review.active.payers);
+      return;
+    }
+    renderReview();
+    for (const p of review.payers.filter((x) => x.charge)) {
+      try { p.cardStatus = await api(`/api/staff/tab/card?id=${encodeURIComponent(p.id)}`); }
+      catch (e) { p.cardStatus = { ok: false, reason: 'error', error: e.message }; }
+      renderReview();
+    }
+  }
+  function cardText(p) {
+    if (!p.charge) return `Rolling (${p.total}, under ${review.minTotal})`;
+    const c = p.cardStatus;
+    if (!c) return 'Checking the card on file';
+    if (c.ok) return `${c.card.brand || 'card'} ending ${c.card.last4} (${c.card.source.replace('_', ' ')})`;
+    if (c.reason === 'missing_contact') return `Missing ${c.missing.join(' and ')}`;
+    if (c.reason === 'no_card') return 'No card on file';
+    return `Could not check: ${c.error || c.reason}`;
+  }
+  function renderReview() {
+    const list = $('closeout-list');
+    list.innerHTML = '';
+    if (review.payers.length === 0) {
+      list.appendChild(el('div', 'empty', 'Nothing open on any tab'));
+      return;
+    }
+    for (const p of review.payers) {
+      const row = el('div', 'row');
+      row.dataset.payer = p.id;
+      row.append(el('span', 'name', displayName(p)), el('span', 'count', p.total));
+      const status = el('span', `status${p.charge && p.cardStatus && p.cardStatus.ok ? ' gold' : ''}`, cardText(p));
+      row.appendChild(status);
+      list.appendChild(row);
+      for (const l of p.lines) {
+        const sub = el('div', 'row sub');
+        sub.append(el('span', 'time', `${fmtDate(l.purchasedAt.slice(0, 10))} ${fmtClock(l.purchasedAt)}`), el('span', 'name', `${l.label} ${fmtCents(l.amountCents)}`));
+        sub.appendChild(confirmButton('Remove', 'Confirm remove', 'remove', async () => {
+          await post('/api/staff/tab/void', { purchaseId: l.purchaseId });
+          toast(`Removed ${l.label} for ${p.first}`);
+          await loadCloseout();
+        }));
+        list.appendChild(sub);
+      }
+    }
+    const ready = review.payers.filter((p) => p.charge && p.cardStatus && p.cardStatus.ok);
+    const pendingChecks = review.payers.some((p) => p.charge && !p.cardStatus);
+    const btn = $('closeout-charge');
+    const total = ready.reduce((n, p) => n + p.totalCents, 0);
+    btn.style.display = review.payers.some((p) => p.charge) ? '' : 'none';
+    btn.disabled = pendingChecks || ready.length === 0;
+    btn.textContent = pendingChecks ? 'Checking cards' : ready.length ? `Charge ${ready.length} member${ready.length === 1 ? '' : 's'}, ${fmtCents(total)}` : 'Nobody can be charged';
+    btn.classList.remove('confirm');
+    btn.onclick = async () => {
+      if (!btn.classList.contains('confirm')) {
+        btn.classList.add('confirm');
+        btn.textContent = `Confirm: charge ${ready.length} member${ready.length === 1 ? '' : 's'}, ${fmtCents(total)}`;
+        setTimeout(() => { btn.classList.remove('confirm'); renderReview(); }, 6000);
+        return;
+      }
+      btn.disabled = true;
+      let started;
+      try {
+        started = await post('/api/staff/tab/closeout', { payerIds: ready.map((p) => p.id) });
+      } catch (e) {
+        toast(`Could not start: ${e.message}`);
+        btn.disabled = false;
+        return;
+      }
+      $('closeout-list').innerHTML = '';
+      btn.style.display = 'none';
+      renderProgress(started.payers);
+      for (const row of started.payers) {
+        await runOne(row, 'run');
+      }
+      toast('Close-out finished');
+    };
+  }
+  function stateText(r) {
+    if (r.state === 'autopay_on') return `${r.invoiceStatus === 'sent' ? 'Invoice sent, charging' : 'Charging'}${r.chargeDay ? ` on ${fmtDate(r.chargeDay)}` : ''}`;
+    if (r.state === 'skipped_missing_contact' && r.missing) return `Missing ${r.missing.join(' and ')}`;
+    return STATE_LABEL[r.state] || r.state;
+  }
+  function renderProgress(rows) {
+    const box = $('closeout-progress');
+    box.innerHTML = '';
+    for (const r of rows) box.appendChild(progressRow(r));
+  }
+  function progressRow(r) {
+    const row = el('div', 'row');
+    row.dataset.cp = r.closeoutPayerId;
+    row.append(el('span', 'name', displayName(r)), el('span', 'count', r.total));
+    const status = el('span', `status${r.state === 'paid' || r.state === 'paid_at_pos' ? ' gold' : ''}`, stateText(r));
+    row.appendChild(status);
+    if (r.card) row.appendChild(el('span', 'tag', `${r.card.brand || 'card'} ${r.card.last4}`));
+    if (r.state === 'failed' || r.note) row.appendChild(el('span', 'tag warn', r.note || 'needs a look'));
+    if (r.state === 'pending' || r.state === 'schedule_created') {
+      const retry = el('button', 'remove', 'Retry');
+      retry.type = 'button';
+      retry.addEventListener('click', () => runOne(r, 'run'));
+      row.appendChild(retry);
+    }
+    if (r.state === 'autopay_on') {
+      const check = el('button', 'remove', 'Check');
+      check.type = 'button';
+      check.addEventListener('click', () => runOne(r, 'refresh'));
+      row.appendChild(check);
+    }
+    if (!['paid', 'paid_at_pos', 'pending'].includes(r.state)) {
+      row.appendChild(confirmButton('Charged at POS', 'Confirm charged at POS', 'remove', () => runOne(r, 'pos')));
+    }
+    return row;
+  }
+  async function runOne(r, action) {
+    const box = $('closeout-progress');
+    const existing = box.querySelector(`[data-cp="${r.closeoutPayerId}"]`);
+    if (existing) existing.querySelector('.status').textContent = action === 'pos' ? 'Recording' : action === 'refresh' ? 'Checking' : 'Working';
+    let out;
+    try {
+      out = await post(`/api/staff/tab/closeout/${action}`, { closeoutPayerId: r.closeoutPayerId, note: action === 'pos' ? 'staff page' : undefined });
+    } catch (e) {
+      out = { ok: false, row: { ...r, note: e.message } };
+    }
+    const row = out.row || { ...r, note: out.error || out.reason || 'no answer' };
+    const fresh = progressRow(row);
+    if (existing) existing.replaceWith(fresh); else box.appendChild(fresh);
+    return row;
+  }
+  async function checkAll(rows) {
+    for (const r of rows) if (r.state === 'autopay_on') await runOne(r, 'refresh');
+  }
 
   function renderMemberTab(d, m) {
     const box = $('member-tab');

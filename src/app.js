@@ -2,7 +2,11 @@
 // object so tests can pass their own without touching the JSON import.
 
 import { syncRoster } from './roster.js';
-import { fetchAllContacts, fetchCustomFieldIds, ghlPutContactCustomFields } from './ghl.js';
+import {
+  fetchAllContacts, fetchCustomFieldIds, ghlPutContactCustomFields,
+  ghlGetContact, ghlListTransactions, ghlGetTransaction, ghlFindSchedules, ghlGetSchedule, ghlCreateSchedule, ghlActivateSchedule, ghlListInvoices,
+} from './ghl.js';
+import { reviewPayers, payerCardStatus, startCloseout, runPayer, refreshPayer, markPaidAtPos, latestCloseout, closeoutPayers } from './closeout.js';
 import { runRollup } from './rollup.js';
 import { notifyWaiverCheckin, waiverEnabled, logWaiverFailure } from './waiver.js';
 import { hasWaiverColumn, hasPromotionsTable, hasTabTables } from './schema-caps.js';
@@ -209,6 +213,11 @@ export function defaultDeps() {
         contactId,
         now,
       ),
+    ghl: {
+      getContact: ghlGetContact, listTransactions: ghlListTransactions, getTransaction: ghlGetTransaction,
+      findSchedules: ghlFindSchedules, getSchedule: ghlGetSchedule, createSchedule: ghlCreateSchedule,
+      activateSchedule: ghlActivateSchedule, listInvoices: ghlListInvoices,
+    },
     pinLink: (env, contactId, link, now) =>
       writePinLink(
         env,
@@ -519,6 +528,83 @@ export function createApp(schedule, deps = defaultDeps(), opts = {}) {
               if (!member) return json({ error: 'unknown member' }, 404);
               return json(await clearLockout(env, member.ghl_contact_id));
             }
+            // ---- close-out (§15.3 step 6) ----
+            // One payer per request, driven from the browser. Rows leave here
+            // with an opaque id and without the card ids kept for the resume.
+            const salt = requireSalt(env);
+            const safeRow = async (r) => {
+              const d = r.detail || {};
+              return {
+                closeoutPayerId: r.closeoutPayerId, closeoutId: r.closeoutId, id: await opaqueId(r.payerId, salt),
+                first: r.first, last: r.last, amountCents: r.amountCents, total: r.total, invoiceName: r.invoiceName,
+                state: r.state, card: r.card, invoiceId: r.invoiceId, updatedAt: r.updatedAt,
+                chargeDay: d.chargeDay || null, invoiceStatus: d.invoiceStatus || null, note: d.attention || d.note || d.error || null,
+                missing: d.missing || null, pos: d.pos || null,
+              };
+            };
+            const safeRows = async (rows) => { const out = []; for (const r of rows) out.push(await safeRow(r)); return out; };
+            const ghl = deps.ghl;
+            const closeoutRoute = path.startsWith('/api/staff/tab/closeout') || path === '/api/staff/tab/review' || path === '/api/staff/tab/card';
+            if (closeoutRoute && !ghl) return json({ error: 'close-out is not wired' }, 500);
+
+            if (method === 'GET' && path === '/api/staff/tab/review') {
+              const payers = [];
+              for (const p of await reviewPayers(env, cfg, at)) {
+                const { payerId, ...rest } = p;
+                payers.push({ ...rest, id: await opaqueId(payerId, salt) });
+              }
+              const latest = await latestCloseout(env);
+              return json({
+                payers, minCents: cfg.minCents, minTotal: formatCents(cfg.minCents), maxRollDays: cfg.maxRollDays,
+                active: latest && !latest.done ? { closeoutId: latest.closeoutId, createdAt: latest.createdAt, payers: await safeRows(latest.payers) } : null,
+              });
+            }
+            if (method === 'GET' && path === '/api/staff/tab/card') {
+              const member = await resolveMember(env, url.searchParams.get('id'));
+              if (!member) return json({ error: 'unknown member' }, 404);
+              try {
+                const r = await payerCardStatus(ghl, env, member.ghl_contact_id);
+                return json({ ok: r.ok, reason: r.reason || null, missing: r.missing || null, card: r.card ? { brand: r.card.brand, last4: r.card.last4, source: r.card.source } : null });
+              } catch (e) {
+                return json({ ok: false, reason: 'error', error: e && e.message ? e.message : String(e) }, 502);
+              }
+            }
+            if (method === 'POST' && path === '/api/staff/tab/closeout') {
+              const body = await readJson(request);
+              if (!body || !Array.isArray(body.payerIds)) return json({ error: 'expected { payerIds: [] }' }, 400);
+              const ids = [];
+              for (const oid of body.payerIds) { const m = await resolveMember(env, oid); if (m) ids.push(m.ghl_contact_id); }
+              const r = await startCloseout(env, cfg, ids, at);
+              if (!r.ok) return json({ ok: false, reason: r.reason }, 409);
+              return json({ ok: true, closeoutId: r.closeoutId, payers: await safeRows(r.payers) });
+            }
+            if (method === 'GET' && path === '/api/staff/tab/closeout') {
+              const idParam = url.searchParams.get('id');
+              if (idParam) {
+                const rows = await closeoutPayers(env, Number(idParam));
+                return json({ closeoutId: Number(idParam), payers: await safeRows(rows) });
+              }
+              const latest = await latestCloseout(env);
+              return json(latest ? { closeoutId: latest.closeoutId, createdAt: latest.createdAt, done: latest.done, payers: await safeRows(latest.payers) } : { closeoutId: null, payers: [] });
+            }
+            if (method === 'POST' && (path === '/api/staff/tab/closeout/run' || path === '/api/staff/tab/closeout/refresh' || path === '/api/staff/tab/closeout/pos')) {
+              const body = await readJson(request);
+              const cpId = Number(body && body.closeoutPayerId);
+              if (!Number.isInteger(cpId) || cpId <= 0) return json({ error: 'closeoutPayerId required' }, 400);
+              try {
+                const r = path.endsWith('/run') ? await runPayer(env, ghl, cfg, cpId, at)
+                  : path.endsWith('/refresh') ? await refreshPayer(env, ghl, cpId, at, env.TZ || tz)
+                  : await markPaidAtPos(env, cpId, body.note, at);
+                if (!r.row) return json({ ok: false, reason: r.reason || 'unknown' }, 404);
+                return json({ ok: r.ok, reason: r.reason || null, row: await safeRow(r.row) });
+              } catch (e) {
+                // A GHL failure mid-step: the row already holds where it got to. Say so and let the page retry.
+                const rows = await env.DB.prepare('SELECT closeout_id FROM closeout_payers WHERE id = ?').bind(cpId).first();
+                const row = rows ? (await closeoutPayers(env, rows.closeout_id)).find((x) => x.closeoutPayerId === cpId) : null;
+                return json({ ok: false, reason: 'error', error: e && e.message ? e.message : String(e), row: row ? await safeRow(row) : null }, 502);
+              }
+            }
+
             if (method === 'GET' && path === '/api/staff/tab/activity') {
               const salt = requireSalt(env);
               const day = localParts(at, env.TZ || tz).date;

@@ -18,8 +18,8 @@
 | Nightly rollup push to GHL, 03:00 ET | `src/rollup.js` | The only GHL write |
 | Waiver prompt (§15.1) | `src/waiver.js`, `src/fields.js` | Field check on every roster sync; nudge failures in `sync_log` |
 | Stripe tab (§15.2) | `src/promotions.js` | Eligibility from attended classes since the last stripe |
-| Drink tab (§15.3), Phase 1 minus the close-out | `src/tab.js`, `src/pin.js`, `src/purchases.js`, `public/pin.html`, `tab-items.json` | Kiosk drink row, PIN by texted link, staff Tab view. Close-out gated on the $0.50 test |
-| Tests | `test/` | `npm test`: 221 unit tests, no network. `npm run test:browser` needs Playwright |
+| Drink tab (§15.3), Phase 1 | `src/tab.js`, `src/pin.js`, `src/purchases.js`, `src/closeout.js`, `public/pin.html`, `tab-items.json` | Kiosk drink row, PIN by texted link, staff Tab view, review and charge through GHL invoices with saved-card auto-pay |
+| Tests | `test/` | `npm test`: 243 unit tests, no network. `npm run test:browser` needs Playwright |
 
 ## Decisions made without you (confirm or say otherwise)
 
@@ -109,7 +109,13 @@ Not built: a GHL notification on a threshold. That needs a sixth custom field, w
 
 ## V2: drink tab (§15.3)
 
-Built 2026-09-25, steps 1 to 5 of the build order in `CLAUDE.md` §15.3. **The close-out (step 6, the part that charges anyone) is not built yet.** It waits on you confirming the $0.50 test charged. Until then a member can put drinks on their tab and staff can see and remove them; nobody is charged.
+Built 2026-09-25, all seven steps of the build order in `CLAUDE.md` §15.3. The $0.50 test settled that afternoon (charged about ten hours after the invoice went out), so the close-out is built too.
+
+**What the close-out does.** On the Tab view, **Review and charge** lists every payer with open lines: their total, and either the card that will be charged (brand, last four, where it was saved), "Rolling (under $5)", "No card on file" or "Missing email or phone". The card check runs one payer at a time from the page. One button, "Charge N members, $X", asks for a confirm tap, then works through the payers one per request with live progress. Each payer gets one GHL invoice schedule with saved-card auto-pay; GHL texts and emails them its standard invoice message and charges the card sometime that day. Every step is written to D1 before the next runs, so a crash mid-way resumes without a second invoice. **Check** reads the invoice status; **Charged at POS** closes a payer by hand with no GHL call, for a failed charge or a member with no saved card. A payer with no card is flagged so the drink row hides for them until you clear it on their member screen.
+
+**The first live close-out should be you alone**, with drinks worth $5 on your own tab, watched on the staff page. The response shapes from GHL were observed once, not documented, and the code reads them tolerantly; one real run through the review screen confirms them. If a row lands on "needs a look", read the note on it before pressing anything.
+
+Timing to expect: the invoice text arrives within minutes of the button; the charge lands later that day. The row reads "Charging on <day>" until then, and "Paid" once Check sees it. A row still unpaid the day after the charge day reads "Not paid, needs a look".
 
 What a member sees: after an adult checks in, the success screen asks "Thirsty?", shows `Water $1` and `Hydration $3`, and says in small print "Charged to your account." Tapping one asks for their 4-digit purchase PIN on a big keypad. A member with no PIN yet sees "Text me a setup link"; the Worker writes the link to the `purchase_pin_link` field and your GHL workflow texts it. The link opens `/pin`, where they pick the PIN. Kids never see any of this. A purchase is online only: if it does not reach the server, the screen says "That didn't go through. Nothing was added to your tab." and nothing is queued.
 
@@ -143,7 +149,7 @@ Known limit, not part of this work: the nightly rollup pushes every pending cont
 - Confirm the four class durations in `schedule.json`.
 - iPad: Add to Home Screen, Guided Access, auto-lock off.
 - Consider Workers Paid ($5/month) for the request and D1 caps.
-- Confirm the $0.50 test invoice charged (due 03:59:59Z on 2026-09-26). The close-out build waits on it.
+- Run the first live close-out on yourself alone and confirm the row goes Charging, then Paid.
 - Read the Cloudflare limits page once and paste the subrequest and CPU numbers for this plan into the §15.3 section above.
 
 ## Shipping a change from a session branch
@@ -296,4 +302,4 @@ Cloudflare, replace all of this with a Custom Domain on the Worker.
 
 ## Not built (V2, per §10 and §13)
 
-Family view, member portal, QR codes, GHL calendar sync, notes, class billing and dues. (Stripes and belts came in as an approved V2 item, §15.2, and are built. The drink tab, §15.3, is built up to the close-out.) `schedule.json` stays the source of truth for classes until V1.1 replaces it with the GHL calendar sync.
+Family view, member portal, QR codes, GHL calendar sync, notes, class billing and dues. (Stripes and belts came in as an approved V2 item, §15.2, and are built. The drink tab, §15.3, is built through the close-out.) `schedule.json` stays the source of truth for classes until V1.1 replaces it with the GHL calendar sync.

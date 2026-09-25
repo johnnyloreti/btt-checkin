@@ -39,7 +39,19 @@ env.ASSETS = {
     return new Response(readFileSync(p), { headers: { 'content-type': TYPES[extname(p)] || 'application/octet-stream' } });
   },
 };
-const app = createApp(schedule, { runRosterSync: async () => ({ outcome: 'ok', members: 7 }), now: () => NOW }, { tabItems });
+// A scripted GHL for the close-out: Dan has a card saved on a funnel payment, Emma has none.
+const ghlState = { schedules: [], active: {}, invoices: {} };
+const fakeGhl = {
+  getContact: async (e, id) => ({ id, name: id === 'c_dan' ? 'Dan Kim' : 'Someone', email: `${id}@example.test`, phone: '+15555550100' }),
+  listTransactions: async (e, id) => (id === 'c_dan' ? [{ _id: 't1', status: 'succeeded', liveMode: true, entitySourceType: 'funnel', createdAt: '2026-08-01T00:00:00Z' }] : []),
+  getTransaction: async () => ({ _id: 't1', chargeSnapshot: { customer: 'cus_dan', payment_method: { id: 'pm_dan', card: { brand: 'visa', last4: '6222' } } } }),
+  findSchedules: async () => [],
+  getSchedule: async (e, id) => ghlState.active[id] || { _id: id, status: 'draft' },
+  createSchedule: async (e, body) => { const id = `sch_${ghlState.schedules.length + 1}`; ghlState.schedules.push({ _id: id, ...body }); return { id, raw: {} }; },
+  activateSchedule: async (e, id, auto) => { ghlState.active[id] = { _id: id, status: 'active', autoPayment: auto }; return {}; },
+  listInvoices: async (e, id) => ghlState.invoices[id] || [],
+};
+const app = createApp(schedule, { runRosterSync: async () => ({ outcome: 'ok', members: 7 }), ghl: fakeGhl, now: () => NOW }, { tabItems });
 
 // Bridge node http → the Worker's fetch handler.
 const server = http.createServer(async (req, res) => {
@@ -334,6 +346,50 @@ await step('member screen: the tab section, and Set up PIN hands over a setup li
   await page.waitForSelector('#member.active');
   await page.waitForFunction(() => /not eligible/.test(document.getElementById('member-tab-actions').textContent));
   assert.equal(await page.locator('#member-pin-setup').count(), 0);
+});
+
+await step('close-out: review shows the card or the reason, then one confirm charges and shows progress', async () => {
+  const cfg = tabConfig(env, tabItems);
+  // Dan already has $1 open from the earlier step; two hydrations take him to $7. María: $1, rolls.
+  await recordPurchase(env, cfg, { buyerId: 'c_dan', payerId: 'c_dan', itemKey: 'hydration', method: 'kiosk', now: new Date(NOW.getTime() - 3 * 60_000) });
+  await recordPurchase(env, cfg, { buyerId: 'c_dan', payerId: 'c_dan', itemKey: 'hydration', method: 'kiosk', now: new Date(NOW.getTime() - 2 * 60_000) });
+  await recordPurchase(env, cfg, { buyerId: 'c_maria', payerId: 'c_maria', itemKey: 'water', method: 'kiosk', now: new Date(NOW.getTime() - 60_000) });
+
+  await page.click('.tab[data-tab="tab"]');
+  await page.waitForSelector('#tab-closeout');
+  await page.click('#tab-closeout');
+  await page.waitForSelector('#closeout.active');
+  await page.waitForFunction(() => /ending 6222/.test(document.getElementById('closeout-list').textContent));
+  const text = await page.locator('#closeout-list').textContent();
+  assert.match(text, /Dan Kim.*\$7.*visa ending 6222 \(funnel\)/);
+  assert.match(text, /María Núñez.*\$1.*Rolling \(\$1, under \$5\)/);
+  assert.equal(await page.locator('#closeout-charge').textContent(), 'Charge 1 member, $7');
+  await page.screenshot({ path: join(OUT, 'staff-closeout-review.png') });
+
+  await page.click('#closeout-charge');
+  assert.match(await page.locator('#closeout-charge').textContent(), /^Confirm: charge 1 member, \$7/);
+  await page.click('#closeout-charge');
+  await page.waitForFunction(() => /Invoice sent, charging|Charging on/.test(document.getElementById('closeout-progress').textContent));
+  const progress = await page.locator('#closeout-progress').textContent();
+  assert.match(progress, /Dan Kim.*\$7.*Charging on Sat, Sep 5.*visa 6222/);
+  await page.screenshot({ path: join(OUT, 'staff-closeout-progress.png') });
+
+  const row = env.DB.raw.prepare('SELECT state, invoice_schedule_id, invoice_name FROM closeout_payers').get();
+  assert.equal(row.state, 'autopay_on');
+  assert.equal(row.invoice_schedule_id, 'sch_1');
+  assert.equal(ghlState.schedules[0].name, row.invoice_name);
+  assert.deepEqual(ghlState.schedules[0].items.map((i) => [i.name, i.qty, i.amount]), [['Water', 1, 1], ['Hydration', 2, 3]]);
+  assert.equal(ghlState.active.sch_1.autoPayment.paymentMethodId, 'pm_dan');
+  assert.equal(env.DB.raw.prepare("SELECT COUNT(*) AS n FROM purchases WHERE payer_contact_id = 'c_dan' AND status = 'invoiced'").get().n, 3);
+  assert.equal(env.DB.raw.prepare("SELECT status FROM purchases WHERE payer_contact_id = 'c_maria'").get().status, 'open', 'María rolled');
+
+  // The invoice gets paid; Check shows it.
+  ghlState.invoices.c_dan = [{ _id: 'inv_1', scheduleId: 'sch_1', status: 'paid', amountPaid: 7 }];
+  await page.click('#closeout-progress .row .remove:has-text("Check")');
+  await page.waitForFunction(() => /Paid/.test(document.getElementById('closeout-progress').textContent));
+  assert.equal(env.DB.raw.prepare('SELECT state FROM closeout_payers').get().state, 'paid');
+  await page.click('#closeout-back');
+  await page.waitForSelector('#tabview.active');
 });
 
 await step('sign out returns to the login page', async () => {

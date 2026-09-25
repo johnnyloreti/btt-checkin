@@ -433,7 +433,7 @@ A member who checks in can put a drink on their tab. The tab is charged to the c
 
 Written from the btt-ops brief (revisions 1 and 2), this session's two reviews, and the GHL facts below, which were verified against the live sub-account from the btt-ops side on 2026-09-25. Nothing here was invented in this repo: every endpoint, field, id and behaviour is either from that verification or from this repo's own code.
 
-**Status of the payment step: unproven until Johnny confirms.** A $0.50 live test invoice was scheduled on 2026-09-25 at 09:01 UTC against a card saved from a one-time Apple Pay payment through a payment link. The invoice generated and sent on time. The saved-card charge is queued for the invoice's due date, 23:59:59 ET on 2026-09-25 (03:59:59Z on 09-26). The test card was saved with `setup_future_usage = off_session`, the same way every funnel and payment-link card is, so it is a representative test. **Build step 6 (the close-out's GHL calls) does not start until Johnny confirms the test was charged.** If it was not, stop and report.
+**The payment step is proven.** A $0.50 live test invoice was scheduled on 2026-09-25 with `executeAt` 09:01Z against a card saved from a one-time Apple Pay payment through a payment link (`setup_future_usage = off_session`, the same way every funnel and payment-link card is saved). The invoice generated and sent at 09:01Z as `sent`. The saved-card auto-pay charged at 19:02:01Z the same day, about ten hours later and before the due date; the invoice went to `paid`, the transaction was `entitySourceType: invoice`, live, on the same `pm_` and `cus_` ids passed in `autoPayment`. Johnny confirmed on 2026-09-25 and step 6 was built the same day.
 
 #### Amendments to earlier sections (also noted in place)
 
@@ -526,7 +526,7 @@ CREATE TABLE IF NOT EXISTS closeout_payers (
   closeout_id         INTEGER NOT NULL,
   payer_contact_id    TEXT NOT NULL,
   amount_cents        INTEGER NOT NULL,
-  invoice_name        TEXT NOT NULL,       -- "BTT tab #<closeout_id>-<payer_contact_id>", unique
+  invoice_name        TEXT NOT NULL,       -- "BTT tab #<closeout_id>-<8 hex of sha256(payer id)>", unique
   state               TEXT NOT NULL CHECK (state IN
                         ('pending','schedule_created','autopay_on','paid','failed',
                          'paid_at_pos','skipped_no_card','skipped_missing_contact')),
@@ -546,7 +546,7 @@ CREATE TABLE IF NOT EXISTS tab_flags (
 );
 ```
 
-Amounts are in cents, copied at purchase time, so a price change never rewrites history. `invoiced` on a purchase means an invoice was created, not that the card was charged; `closeout_payers.state` tracks the charge. `invoice_name` is derived from the close-out id and the payer id, so it exists before the row does and is unique without a second write.
+Amounts are in cents, copied at purchase time, so a price change never rewrites history. `invoiced` on a purchase means an invoice was created, not that the card was charged; `closeout_payers.state` tracks the charge. `invoice_name` is derived from the close-out id and a short hash of the payer id, so it exists before the row does, is unique without a second write, reads fine on the member's invoice, and carries no GHL id.
 
 #### Items
 
@@ -608,9 +608,11 @@ Each step writes its result to the `closeout_payers` row before the next step ru
 3. **Card on file**, per the lookup rule. Save brand, last 4, source on the row.
 4. **Create the schedule.** `POST /invoices/schedule` with `altId`, `altType: "location"`, `name: <invoice_name>`, `contactDetails: { id, name, phoneNo, email }` (all four required), `schedule: { executeAt: "YYYY-MM-DDTHH:mm:ssZ" }` (that exact format, **no milliseconds**, or 422), `liveMode: true`, `businessDetails: { name: "Brazilian Top Team Bridgewater" }`, `currency: "USD"`, `discount: { type: "percentage", value: 0 }`, `items` one per line with `name`, `currency`, `amount` (dollars), `qty`, `productId`, `priceId`, `type: "one_time"`. Save the returned id immediately: `schedule_created`.
 5. **Auto-pay on and activate, once.** Re-POSTing this has not been tested and will not be on a live card, so treat it as **not idempotent**: first `GET /invoices/schedule/{scheduleId}` and, if it is already active with auto-pay, skip the POST. Otherwise `POST /invoices/schedule/{scheduleId}/schedule` with `altId`, `altType`, `liveMode: true`, `autoPayment: { enable: true, type: "saved_card", paymentMethodId, customerId, card: { brand, last4 } }`. `type` must be exactly `"saved_card"`; `"card"`, `"stripe"` and empty all return 422. State `autopay_on`; mark that payer's purchases `invoiced` with `closeout_payer_id`.
-6. **Status, on demand.** `GET /invoices/?altId=…&altType=location&contactId={payer}` finds the generated invoice (its `scheduleId` matches). `status` moves from `sent` to `paid` when the card is charged. Record `invoice_id` and `paid` or `failed`. A failed charge re-opens nothing automatically; staff see it and use Charged at POS or Johnny decides.
+6. **Status, on demand.** `GET /invoices/?altId=…&altType=location&contactId={payer}` finds the generated invoice (its `scheduleId` matches). `status` moves from `sent` to `paid` when the card is charged. Record `invoice_id` and `paid`. **The charge time is not fixed**: on the test it landed about ten hours after `executeAt`, before the due date. So `sent` is pending through the end of the day after the charge day (ET), and only an invoice still unpaid after that, or one that reads `void`, `failed` or `cancelled`, is set `failed`. A failed charge re-opens nothing automatically; staff see it and use Charged at POS or Johnny decides.
 
-**Observed dependency (2026-09-25), pinned in the step 6 fixtures:** the schedule create body has no due-date field. GHL set `issueDate` to midnight ET of the `executeAt` day and `dueDate` to 23:59:59.999 ET the same day, and the saved-card charge runs on that due date. The invoice is generated at `executeAt` and immediately texted and emailed to the contact with GHL's built-in wording, which cannot be changed in this account. `executeAt` is set to a few minutes after the close-out, so the charge lands that night.
+**Observed (2026-09-25), pinned in the step 6 fixtures:** the schedule create body has no due-date field. GHL set `issueDate` to midnight ET of the `executeAt` day and `dueDate` to 23:59:59.999 ET the same day. The invoice is generated at `executeAt` and immediately texted and emailed to the contact with GHL's built-in wording, which cannot be changed in this account. The saved-card charge lands sometime on the `executeAt` day, not at `executeAt` and not only at the due date. `executeAt` is set five minutes after the close-out.
+
+**Resume rules, as built.** A schedule GHL returns is treated as active when it reads `status: active` or `autoPayment.enable: true`, inactive on `draft`, `inactive`, `scheduled` or `enable: false`, and **unknown otherwise; an unknown schedule is left alone and the row is flagged for a person**, because a second activation is the failure that cannot be undone and a missed one can be closed at the POS. The response shapes for transactions, schedules and invoices are read tolerantly (a list bare or under `data`, `transactions`, `schedules`, `invoices`; a card under `chargeSnapshot.payment_method.card`) because they were observed, not documented. **The first live close-out should be one payer, Johnny, watched on the staff page.**
 
 #### Allowed GHL calls, exhaustively
 
@@ -647,7 +649,7 @@ No refunds, no voids, no deletes, no other write. `test/write-scanner.test.js` e
 3. PIN: HMAC hashing, setup-token flow with the 10-minute limit, the `/pin` setup page, per-member lockout, kiosk-wide failure log, staff open-setup and clear-lockout. `purchase_pin_link` added to `requiredFieldKeys`. Tests for hashing, constant-time compare, expiry, single use, the 10-minute limit and lockout edges.
 4. Kiosk drink row and online-only purchase recording, with the eligibility rule (adult, no kids program, no no-card flag). Tests for the kids exclusion, the flag, and the failure copy.
 5. Staff: tonight's tab, void, member tab, PIN activity, no-card clear.
-6. **Gated on the $0.50 test.** Close-out: review screen with the $5 / 28-day rule and per-payer card status, `closeout_payers` state machine, one payer per request, resume, Charged at POS, status refresh. Fixture tests, no network, per §9 item 11.
+6. Close-out: review screen with the $5 / 28-day rule and per-payer card status, `closeout_payers` state machine, one payer per request, resume, Charged at POS, status refresh. Fixture tests, no network, per §9 item 11. (Built 2026-09-25 after the $0.50 test settled.)
 7. `STATUS.md` and the deploy commands.
 
 **Noted, not part of this work:** the nightly rollup in `src/rollup.js` is not batched and will hit the same 50-call limit as membership grows. Fine today; flagged in `STATUS.md`.

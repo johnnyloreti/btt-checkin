@@ -70,7 +70,7 @@ CREATE TABLE IF NOT EXISTS closeout_payers (
   closeout_id         INTEGER NOT NULL,
   payer_contact_id    TEXT NOT NULL,
   amount_cents        INTEGER NOT NULL,
-  invoice_name        TEXT NOT NULL,       -- "BTT tab #<closeout_id>-<payer_contact_id>", unique
+  invoice_name        TEXT NOT NULL,       -- "BTT tab #<closeout_id>-<8 hex of sha256(payer id)>", unique
   state               TEXT NOT NULL CHECK (state IN
                         ('pending','schedule_created','autopay_on','paid','failed',
                          'paid_at_pos','skipped_no_card','skipped_missing_contact')),

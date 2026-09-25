@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fetchAllContacts, ghlGet, GhlError, GHL_BASE } from '../src/ghl.js';
+import { fetchAllContacts, ghlRequest, GhlError, GHL_BASE } from '../src/ghl.js';
 
 const ENV = { GHL_TOKEN: 'test-token', GHL_LOCATION_ID: 'LOC123' };
 
@@ -17,9 +17,9 @@ function fakeFetch(pages) {
   return { impl, calls };
 }
 
-test('ghlGet sends bearer token, version header, and only GET', async () => {
+test('ghlRequest sends bearer token, version header, and the method it is given', async () => {
   const { impl, calls } = fakeFetch({ '': { contacts: [], meta: {} } });
-  await ghlGet(ENV, '/contacts/', { locationId: 'LOC123', limit: 100, startAfterId: undefined }, impl);
+  await ghlRequest(ENV, 'GET', '/contacts/', { params: { locationId: 'LOC123', limit: 100, startAfterId: undefined }, fetchImpl: impl });
   assert.equal(calls.length, 1);
   assert.equal(calls[0].init.method, 'GET');
   assert.equal(calls[0].init.headers.authorization, 'Bearer test-token');
@@ -29,13 +29,25 @@ test('ghlGet sends bearer token, version header, and only GET', async () => {
   assert.equal(calls[0].url.searchParams.has('startAfterId'), false);
 });
 
-test('ghlGet throws GhlError on non-2xx', async () => {
+test('ghlRequest throws GhlError on non-2xx', async () => {
   const impl = async () => new Response('nope', { status: 401 });
-  await assert.rejects(() => ghlGet(ENV, '/contacts/', {}, impl), (e) => e instanceof GhlError && e.status === 401);
+  await assert.rejects(() => ghlRequest(ENV, 'GET', '/contacts/', { fetchImpl: impl }), (e) => e instanceof GhlError && e.status === 401);
 });
 
-test('ghlGet refuses to run without a token', async () => {
-  await assert.rejects(() => ghlGet({}, '/contacts/', {}, async () => Response.json({})), /GHL_TOKEN/);
+test('ghlRequest refuses to run without a token', async () => {
+  await assert.rejects(() => ghlRequest({}, 'GET', '/contacts/', { fetchImpl: async () => Response.json({}) }), /GHL_TOKEN/);
+});
+
+test('ghlRequest sends a JSON body with the content type, and none without', async () => {
+  const calls = [];
+  const impl = async (url, init) => { calls.push(init); return Response.json({ ok: 1 }); };
+  await ghlRequest(ENV, 'POST', '/invoices/schedule', { body: { name: 'x' }, fetchImpl: impl });
+  assert.equal(calls[0].method, 'POST');
+  assert.equal(calls[0].headers['content-type'], 'application/json');
+  assert.equal(calls[0].body, '{"name":"x"}');
+  await ghlRequest(ENV, 'GET', '/invoices/', { fetchImpl: impl });
+  assert.equal(calls[1].body, undefined);
+  assert.equal(calls[1].headers['content-type'], undefined);
 });
 
 test('fetchAllContacts follows startAfterId across pages and stops', async () => {
