@@ -49,6 +49,14 @@ export function validateTabItems(items) {
 }
 
 export const DEFAULT_MIN_CENTS = 500;
+
+/** "20" → 20; blank, "off" or anything outside 0..23 → null. */
+export function autoHourFrom(value) {
+  const raw = String(value ?? '').trim().toLowerCase();
+  if (raw === '' || raw === 'off') return null;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 0 && n <= 23 ? n : null;
+}
 export const DEFAULT_MAX_ROLL_DAYS = 28;
 
 /**
@@ -75,6 +83,10 @@ export function tabConfig(env = {}, allItems = {}) {
     minCents: whole(env.TAB_MIN_CENTS, DEFAULT_MIN_CENTS),
     maxRollDays: whole(env.TAB_MAX_ROLL_DAYS, DEFAULT_MAX_ROLL_DAYS),
     publicOrigin: String(env.PUBLIC_ORIGIN || '').trim().replace(/\/+$/, ''),
+    // ET hour at which the cron closes out everyone who is due; null means
+    // the staff button only. Johnny, 2026-09-26: the PIN is the authorization,
+    // so nobody has to press anything for a member who crossed the line.
+    autoHour: autoHourFrom(env.TAB_AUTO_HOUR),
   };
   if (keys.length === 0) return cfg;
   const unknown = keys.filter((k) => !allItems[k]);

@@ -36,6 +36,8 @@ test('/health reports counts and last roster sync', async () => {
     lastRollup: '2026-09-06T07:00:00.000Z',
     lastRollupOutcome: 'degraded',
     pendingRollups: 3,
+    lastTabRun: null,
+    lastTabOutcome: null,
     missingFields: null,
     waiverFailures24h: 0,
     waiverLastFailure: null,

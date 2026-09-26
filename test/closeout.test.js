@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   chargeDecision, reviewPayers, findCard, payerCardStatus, startCloseout, runPayer, refreshPayer, markPaidAtPos,
-  latestCloseout, closeoutPayers, invoiceName, executeAtFor, scheduleIsActive, BUSINESS_NAME,
+  latestCloseout, closeoutPayers, invoiceName, executeAtFor, scheduleIsActive, BUSINESS_NAME, tabTick,
 } from '../src/closeout.js';
 import { recordPurchase } from '../src/purchases.js';
 import { tabConfig, loadTabItems } from '../src/tab.js';
@@ -490,4 +490,111 @@ test('routes: the close-out is 500 when no GHL client is wired, and 404 when the
   const res = await noGhl.fetch(new Request('https://x.test/api/staff/tab/review', { headers: { 'x-staff-pin': '1234' } }), { ...ENV, STAFF_PIN: '1234', ID_SALT: SALT, PIN_PEPPER: 'a-long-pepper-for-tests', DB: (await routeSetup({})).env.DB });
   assert.equal(res.status, 500);
   assert.equal((await staff('/api/staff/tab/activity')).status, 200, 'the other tab routes do not need it');
+});
+
+// ---------- the cron's share ----------
+
+import { jobsForCron, isTabStartTick } from '../src/cron.js';
+import { autoHourFrom } from '../src/tab.js';
+
+test('autoHourFrom and the cron mapping', () => {
+  assert.equal(autoHourFrom('20'), 20);
+  assert.equal(autoHourFrom(' 0 '), 0);
+  for (const bad of ['', 'off', '24', '-1', '8pm', undefined]) assert.equal(autoHourFrom(bad), null, String(bad));
+  const TZ = 'America/New_York';
+  assert.deepEqual(jobsForCron('*/30 * * * *', new Date('2026-09-26T12:00:00Z'), TZ), ['roster']);
+  assert.deepEqual(jobsForCron('*/30 * * * *', new Date('2026-09-26T12:00:00Z'), TZ, { tabOn: true }), ['roster', 'tab']);
+  assert.deepEqual(jobsForCron('*/30 * * * *', new Date('2026-09-26T07:00:00Z'), TZ, { tabOn: true }), ['roster', 'rollup', 'tab']);
+  // 8 PM EDT is 00:00Z the next day.
+  assert.equal(isTabStartTick(new Date('2026-09-27T00:00:00Z'), TZ, 20), true);
+  assert.equal(isTabStartTick(new Date('2026-09-27T00:30:00Z'), TZ, 20), false);
+  assert.equal(isTabStartTick(new Date('2026-09-26T23:00:00Z'), TZ, 20), false);
+  assert.equal(isTabStartTick(new Date('2026-09-27T00:00:00Z'), TZ, null), false);
+  // 8 PM EST in January is 01:00Z.
+  assert.equal(isTabStartTick(new Date('2026-01-16T01:00:00Z'), TZ, 20), true);
+});
+
+test('tabTick: nothing to do is nothing done, and no log row', async () => {
+  const { env, cfg } = await seeded();
+  const f = fakeGhl({});
+  const r = await tabTick(env, f.ghl, cfg, NOW, { start: false });
+  assert.equal(r.did, false);
+  assert.equal(env.DB.raw.prepare("SELECT COUNT(*) AS n FROM sync_log WHERE job = 'tab'").get().n, 0);
+  assert.equal(f.calls.length, 0);
+  const off = await tabTick(env, f.ghl, { ...cfg, enabled: false }, NOW, { start: true });
+  assert.equal(off.did, false);
+});
+
+test('tabTick on the start tick: opens a close-out for everyone due, charges within the budget, continues next tick', async () => {
+  const { env, cfg } = await seeded();
+  const f = fakeGhl({
+    contacts: { c_dan: DAN, c_maria: { id: 'c_maria', name: 'María Núñez', email: 'm@x.test', phone: '+15555550101' }, c_lead: { id: 'c_lead', name: 'Lead Only', email: 'l@x.test', phone: '+15555550102' }, c_sam: { id: 'c_sam', name: 'Sam', email: 's@x.test', phone: '+15555550103' } },
+    transactions: { c_dan: [tx('t1', { pm: 'pm_dan' })], c_maria: [tx('t2', { pm: 'pm_maria' })], c_lead: [tx('t3', { pm: 'pm_lead' })], c_sam: [tx('t4', { pm: 'pm_sam' })] },
+  });
+  for (const who of ['c_dan', 'c_maria', 'c_lead', 'c_sam']) { await buy(env, cfg, who, 'hydration', at(-DAY)); await buy(env, cfg, who, 'hydration', at(-DAY)); }
+  await buy(env, cfg, 'c_newkid', 'water', at(-DAY)); // $1, rolls (and a kid, but the rule is the rule: not due)
+
+  // Not the start tick: a due tab is not touched.
+  let r = await tabTick(env, f.ghl, cfg, NOW, { start: false });
+  assert.equal(r.did, false);
+
+  // The start tick: four due, budget three.
+  r = await tabTick(env, f.ghl, cfg, NOW, { start: true, budget: 3 });
+  assert.equal(r.did, true);
+  assert.equal(r.started, 4);
+  assert.equal(r.advanced, 3);
+  assert.equal(r.outcome, 'ok');
+  let states = env.DB.raw.prepare('SELECT state FROM closeout_payers ORDER BY id').all().map((x) => x.state);
+  assert.deepEqual(states, ['autopay_on', 'autopay_on', 'autopay_on', 'pending']);
+  assert.equal(env.DB.raw.prepare("SELECT status FROM purchases WHERE payer_contact_id = 'c_newkid'").get().status, 'open');
+  const log = env.DB.raw.prepare("SELECT outcome, detail FROM sync_log WHERE job = 'tab'").all();
+  assert.equal(log.length, 1);
+  assert.match(log[0].detail, /"started":4/);
+
+  // Next tick (not a start tick): the fourth is picked up. A start tick would not open a second close-out while this one is unfinished.
+  r = await tabTick(env, f.ghl, cfg, at(30 * 60_000), { start: true, budget: 3 });
+  assert.equal(r.started, 0);
+  assert.equal(r.advanced, 1);
+  states = env.DB.raw.prepare('SELECT state FROM closeout_payers ORDER BY id').all().map((x) => x.state);
+  assert.deepEqual(states, ['autopay_on', 'autopay_on', 'autopay_on', 'autopay_on']);
+  assert.equal(f.count('createSchedule'), 4);
+
+  // Same day: charging rows are not re-read. The next day: they are, one call each, and paid rows close.
+  r = await tabTick(env, f.ghl, cfg, at(60 * 60_000), { start: false, budget: 3 });
+  assert.equal(r.refreshed, 0);
+  f.ghl.listInvoices = async (e, id) => [{ _id: `inv_${id}`, scheduleId: env.DB.raw.prepare('SELECT invoice_schedule_id FROM closeout_payers WHERE payer_contact_id = ?').get(id).invoice_schedule_id, status: id === 'c_sam' ? 'sent' : 'paid' }];
+  r = await tabTick(env, f.ghl, cfg, at(DAY + 60 * 60_000), { start: false, budget: 3 });
+  assert.equal(r.refreshed, 3);
+  r = await tabTick(env, f.ghl, cfg, at(DAY + 90 * 60_000), { start: false, budget: 3 });
+  assert.equal(r.refreshed, 1);
+  states = env.DB.raw.prepare('SELECT state FROM closeout_payers ORDER BY id').all().map((x) => x.state);
+  assert.deepEqual(states, ['paid', 'paid', 'paid', 'autopay_on']);
+  assert.equal((await latestCloseout(env)).done, false);
+});
+
+test('tabTick: a payer that throws is left with the error and retried next tick; a row flagged for a person is left alone', async () => {
+  const { env, cfg } = await seeded();
+  await buy(env, cfg, 'c_dan', 'hydration', at(-DAY));
+  await buy(env, cfg, 'c_dan', 'hydration', at(-DAY));
+  const f = fakeGhl({ contacts: { c_dan: DAN }, transactions: { c_dan: [tx('t1', { pm: 'pm_dan' })] } });
+  const real = f.ghl.activateSchedule;
+  f.ghl.activateSchedule = async () => { throw new Error('GHL 502'); };
+  let r = await tabTick(env, f.ghl, cfg, NOW, { start: true });
+  assert.equal(r.outcome, 'degraded');
+  assert.match(r.errors[0], /Dan Kim: GHL 502/);
+  let row = env.DB.raw.prepare('SELECT state, detail FROM closeout_payers').get();
+  assert.equal(row.state, 'schedule_created');
+  assert.match(row.detail, /GHL 502/);
+  assert.equal(env.DB.raw.prepare("SELECT outcome FROM sync_log WHERE job = 'tab'").get().outcome, 'degraded');
+
+  f.ghl.activateSchedule = real;
+  r = await tabTick(env, f.ghl, cfg, at(30 * 60_000), { start: false });
+  assert.equal(r.advanced, 1);
+  assert.equal(env.DB.raw.prepare('SELECT state FROM closeout_payers').get().state, 'autopay_on');
+  assert.equal(f.count('createSchedule'), 1, 'resumed, not recreated');
+
+  // A row the state machine flagged for a person is not retried by the cron.
+  env.DB.raw.prepare("UPDATE closeout_payers SET state = 'schedule_created', detail = ?").run(JSON.stringify({ attention: 'could not tell' }));
+  r = await tabTick(env, f.ghl, cfg, at(60 * 60_000), { start: false });
+  assert.equal(r.did, false);
 });

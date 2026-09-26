@@ -6,7 +6,7 @@ import {
   fetchAllContacts, fetchCustomFieldIds, ghlPutContactCustomFields,
   ghlGetContact, ghlListTransactions, ghlGetTransaction, ghlFindSchedules, ghlGetSchedule, ghlCreateSchedule, ghlActivateSchedule, ghlListInvoices,
 } from './ghl.js';
-import { reviewPayers, payerCardStatus, startCloseout, runPayer, refreshPayer, markPaidAtPos, latestCloseout, closeoutPayers } from './closeout.js';
+import { reviewPayers, payerCardStatus, startCloseout, runPayer, refreshPayer, markPaidAtPos, latestCloseout, closeoutPayers, tabTick } from './closeout.js';
 import { runRollup } from './rollup.js';
 import { notifyWaiverCheckin, waiverEnabled, logWaiverFailure } from './waiver.js';
 import { hasWaiverColumn, hasPromotionsTable, hasTabTables } from './schema-caps.js';
@@ -50,6 +50,8 @@ export async function health(env, schedule, now = new Date(), opts = {}) {
     lastRollup: null,
     lastRollupOutcome: null,
     pendingRollups: null,
+    lastTabRun: null,
+    lastTabOutcome: null,
     missingFields: null,
     waiverFailures24h: null,
     waiverLastFailure: null,
@@ -59,7 +61,7 @@ export async function health(env, schedule, now = new Date(), opts = {}) {
   };
   try {
     const dayAgo = new Date(now.getTime() - 24 * 3600_000).toISOString();
-    const [count, last, rollup, pending, waiverFails, waiverLast] = await Promise.all([
+    const [count, last, rollup, pending, waiverFails, waiverLast, tabLast] = await Promise.all([
       env.DB.prepare('SELECT COUNT(*) AS n FROM members WHERE active = 1').first(),
       env.DB.prepare(
         "SELECT ran_at, outcome, detail FROM sync_log WHERE job = 'roster' ORDER BY ran_at DESC, id DESC LIMIT 1",
@@ -70,6 +72,7 @@ export async function health(env, schedule, now = new Date(), opts = {}) {
       env.DB.prepare('SELECT COUNT(*) AS n FROM pending_rollups').first(),
       env.DB.prepare("SELECT COUNT(*) AS n FROM sync_log WHERE job = 'waiver' AND ran_at >= ?").bind(dayAgo).first(),
       env.DB.prepare("SELECT ran_at, detail FROM sync_log WHERE job = 'waiver' ORDER BY ran_at DESC, id DESC LIMIT 1").first(),
+      env.DB.prepare("SELECT ran_at, outcome FROM sync_log WHERE job = 'tab' ORDER BY ran_at DESC, id DESC LIMIT 1").first(),
     ]);
     out.memberCount = count ? Number(count.n) : 0;
     if (last) {
@@ -87,6 +90,10 @@ export async function health(env, schedule, now = new Date(), opts = {}) {
         out.ok = false;
         out.error = `GHL custom field(s) missing: ${out.missingFields.join(', ')}. Writes to them are being lost.`;
       }
+    }
+    if (tabLast) {
+      out.lastTabRun = tabLast.ran_at;
+      out.lastTabOutcome = tabLast.outcome;
     }
     out.waiverFailures24h = waiverFails ? Number(waiverFails.n) : 0;
     if (waiverLast && waiverLast.ran_at >= dayAgo) {
@@ -169,6 +176,15 @@ export async function resolveMember(env, id) {
   return map.get(id) || null;
 }
 
+/** The cron's last tab run, for the staff page: { ranAt, outcome, started, advanced, refreshed, errors } or null. */
+async function lastTabRun(env) {
+  const row = await env.DB.prepare("SELECT ran_at, outcome, detail FROM sync_log WHERE job = 'tab' ORDER BY ran_at DESC, id DESC LIMIT 1").first();
+  if (!row) return null;
+  let d = {};
+  try { d = row.detail ? JSON.parse(row.detail) : {}; } catch { d = {}; }
+  return { ranAt: row.ran_at, outcome: row.outcome, started: d.started || 0, advanced: d.advanced || 0, refreshed: d.refreshed || 0, errors: d.errors || [] };
+}
+
 /** Program keys on a members row, or [] when the JSON is bad. */
 export function memberPrograms(member) {
   try {
@@ -195,6 +211,15 @@ function asset(env, request, path) {
   return env.ASSETS.fetch(new Request(url.toString(), { method: 'GET', headers: request.headers }));
 }
 
+/** The GHL calls the close-out makes, as one object closeout.js can take. */
+function ghlBundle() {
+  return {
+    getContact: ghlGetContact, listTransactions: ghlListTransactions, getTransaction: ghlGetTransaction,
+    findSchedules: ghlFindSchedules, getSchedule: ghlGetSchedule, createSchedule: ghlCreateSchedule,
+    activateSchedule: ghlActivateSchedule, listInvoices: ghlListInvoices,
+  };
+}
+
 /** Default job runners. Tests inject fixtures through deps. */
 export function defaultDeps() {
   return {
@@ -213,11 +238,8 @@ export function defaultDeps() {
         contactId,
         now,
       ),
-    ghl: {
-      getContact: ghlGetContact, listTransactions: ghlListTransactions, getTransaction: ghlGetTransaction,
-      findSchedules: ghlFindSchedules, getSchedule: ghlGetSchedule, createSchedule: ghlCreateSchedule,
-      activateSchedule: ghlActivateSchedule, listInvoices: ghlListInvoices,
-    },
+    ghl: ghlBundle(),
+    runTab: (env, cfg, now, opts) => tabTick(env, ghlBundle(), cfg, now, opts),
     pinLink: (env, contactId, link, now) =>
       writePinLink(
         env,
@@ -493,6 +515,8 @@ export function createApp(schedule, deps = defaultDeps(), opts = {}) {
                 enabled: true, date: day, timezone: env.TZ || tz,
                 purchases: rows, openCents: open.reduce((n, r) => n + r.amountCents, 0), openTotal: formatCents(open.reduce((n, r) => n + r.amountCents, 0)),
                 activity: { failedToday: a.failed, locked },
+                autoHour: cfg.autoHour,
+                lastRun: await lastTabRun(env),
               });
             }
             if (!cfg) return json({ error: 'drink tab is off' }, 404);
@@ -555,7 +579,7 @@ export function createApp(schedule, deps = defaultDeps(), opts = {}) {
               }
               const latest = await latestCloseout(env);
               return json({
-                payers, minCents: cfg.minCents, minTotal: formatCents(cfg.minCents), maxRollDays: cfg.maxRollDays,
+                payers, minCents: cfg.minCents, minTotal: formatCents(cfg.minCents), maxRollDays: cfg.maxRollDays, autoHour: cfg.autoHour,
                 active: latest && !latest.done ? { closeoutId: latest.closeoutId, createdAt: latest.createdAt, payers: await safeRows(latest.payers) } : null,
               });
             }

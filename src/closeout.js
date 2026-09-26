@@ -410,3 +410,79 @@ export async function markPaidAtPos(env, closeoutPayerId, note, now) {
   ]);
   return { ok: true, row: rowOut(await getPayerRow(env, row.id)) };
 }
+
+// ---------- the cron's share ----------
+
+export const TICK_PAYER_BUDGET = 3; // payers advanced per tick: ~12 GHL calls each at worst, under the per-invocation limit
+
+/**
+ * What the cron does for the tab on every tick, cheaply when there is
+ * nothing to do:
+ *   1. continue an unfinished close-out, a few payers per tick;
+ *   2. re-read yesterday's charging rows so "Paid" shows without a tap;
+ *   3. on the start tick (the TAB_AUTO_HOUR tick) open a close-out for
+ *      everyone due, if none is unfinished, and begin on it.
+ * A row that throws is left where it got to with the error in its detail;
+ * the next tick tries it again, and the state machine makes that safe.
+ * Writes a sync_log row (job 'tab') whenever it did anything.
+ */
+export async function tabTick(env, ghl, cfg, now, { start = false, budget = TICK_PAYER_BUDGET, tz = 'America/New_York' } = {}) {
+  const out = { did: false, outcome: 'ok', started: 0, advanced: 0, refreshed: 0, errors: [] };
+  if (!cfg || !cfg.enabled) return out;
+  let left = budget;
+  let latest = await latestCloseout(env);
+
+  if (start && (!latest || latest.done)) {
+    const due = (await reviewPayers(env, cfg, now)).filter((p) => p.charge).map((p) => p.payerId);
+    if (due.length) {
+      const r = await startCloseout(env, cfg, due, now);
+      if (r.ok) { out.started = r.payers.length; out.did = true; latest = await latestCloseout(env); }
+    }
+  }
+
+  if (latest && !latest.done) {
+    for (const p of latest.payers) {
+      if (left <= 0) break;
+      if (p.state !== 'pending' && p.state !== 'schedule_created') continue;
+      // A row a person has already been pointed at waits for that person.
+      if (p.detail && p.detail.attention) continue;
+      left -= 1;
+      out.did = true;
+      try {
+        const r = await runPayer(env, ghl, cfg, p.closeoutPayerId, now);
+        if (r.ok) out.advanced += 1; else out.errors.push(`${p.first} ${p.last}: ${r.reason}`);
+      } catch (e) {
+        const msg = e && e.message ? e.message : String(e);
+        out.errors.push(`${p.first} ${p.last}: ${msg}`);
+        await env.DB.prepare('UPDATE closeout_payers SET detail = ?, updated_at = ? WHERE id = ?')
+          .bind(JSON.stringify({ ...(p.detail || {}), lastError: msg, at: iso(now) }), iso(now), p.closeoutPayerId).run();
+      }
+    }
+  }
+
+  // Yesterday's (and older) charging rows: one read each.
+  const today = localParts(now, tz).date;
+  const { results } = await env.DB.prepare("SELECT id, detail FROM closeout_payers WHERE state = 'autopay_on' ORDER BY id").all();
+  for (const r of results) {
+    if (left <= 0) break;
+    let d = {};
+    try { d = r.detail ? JSON.parse(r.detail) : {}; } catch { d = {}; }
+    if (d.chargeDay && d.chargeDay >= today) continue; // still its charge day; the charge may not have run yet
+    left -= 1;
+    out.did = true;
+    try {
+      await refreshPayer(env, ghl, r.id, now, tz);
+      out.refreshed += 1;
+    } catch (e) {
+      out.errors.push(`refresh ${r.id}: ${e && e.message ? e.message : e}`);
+    }
+  }
+
+  if (out.errors.length) out.outcome = 'degraded';
+  if (out.did) {
+    await env.DB.prepare('INSERT INTO sync_log (job, ran_at, outcome, detail) VALUES (?, ?, ?, ?)')
+      .bind('tab', iso(now), out.outcome, JSON.stringify({ started: out.started, advanced: out.advanced, refreshed: out.refreshed, errors: out.errors }))
+      .run();
+  }
+  return out;
+}

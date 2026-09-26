@@ -283,7 +283,7 @@ Vars in `wrangler.toml`:
 - `MEMBER_TAG_PREFIXES = "foundations-"`
 - `CHECKIN_EARLY_MIN = "180"` and `CHECKIN_LATE_MIN = "180"` (§2 window, minutes)
 - `KIOSK_BACKDATE_DAYS = "3"` and `STAFF_BACKDATE_DAYS = "30"` (§3 backdating, whole days)
-- `TAB_ITEMS`, `TAB_PROGRAMS`, `TAB_MIN_CENTS`, `TAB_MAX_ROLL_DAYS` (§15.3 drink tab; empty `TAB_ITEMS` turns it off)
+- `TAB_ITEMS`, `TAB_PROGRAMS`, `TAB_MIN_CENTS`, `TAB_MAX_ROLL_DAYS`, `TAB_AUTO_HOUR` (§15.3 drink tab; empty `TAB_ITEMS` turns it off, empty `TAB_AUTO_HOUR` makes charging button-only)
 
 `.dev.vars.example` committed; `.dev.vars` gitignored. Parser must handle CRLF and BOM.
 
@@ -586,7 +586,8 @@ A payer is charged when their open tab reaches **$5 (`TAB_MIN_CENTS`) or their o
   3. The page then works through the payers **one request per payer**, looping from the browser, showing live progress (pending, invoiced, paid, failed, skipped). Each payer takes about five GHL calls, well under the Workers Free limit of 50 outbound calls per request.
   4. Leaving the page and coming back resumes where it stopped.
   5. **Charged at POS:** an action on any payer row that sets `paid_at_pos` with a note and marks their purchases `invoiced`, making no GHL call. Staff already charge saved cards at the GHL POS, so a failed payer, or one the invoice route cannot charge, is closed out by hand. The tab never depends on auto-pay alone.
-  6. **Status refresh** happens when the close-out screen is opened, one payer per request from the browser. The cron never touches the tab.
+  6. **Status refresh** happens when the close-out screen is opened, one payer per request from the browser, and once a day from the cron for yesterday's charging rows.
+  7. **Automatic close-out (Johnny, 2026-09-26).** The PIN is the authorization, so nobody has to press anything for a member who crossed the line. On the tick at `TAB_AUTO_HOUR` ET (20, i.e. 8 PM, after the last class) the cron opens a close-out for everyone due by the $5 / 28-day rule and works through it, `TICK_PAYER_BUDGET` (3) payers per tick so one invocation stays well inside the subrequest limit, continuing on the following ticks until done. On every tick it also continues an unfinished close-out and re-reads yesterday's charging rows so "Paid" appears without a tap. A row that throws keeps the error in its detail and is retried next tick; a row the state machine flagged for a person is left alone until a person acts. Each run that did anything writes a `sync_log` row (`job = 'tab'`), and `/health` shows `lastTabRun` and `lastTabOutcome`. Blank `TAB_AUTO_HOUR` turns the automatic run off; the button and the review screen stay either way, for removing a wrong line before 8 PM, charging early, retrying, or Charged at POS.
 
 #### Card on file (verified 2026-09-25)
 
@@ -635,7 +636,7 @@ No refunds, no voids, no deletes, no other write. `test/write-scanner.test.js` e
 
 1. Done: `BTT Check-In` integration scopes widened (`payments/transactions.readonly`, `invoices.readonly`, `invoices/schedule.readonly`, `invoices/schedule.write`).
 2. Done: contact field `purchase_pin_link` (key `contact.purchase_pin_link`), and the published workflow "Check-In: Purchase PIN setup link" (trigger: Contact Changed on that field; action: SMS with the link; re-entry on). An If/Else "field is not empty" guard is being added, because the trigger fires on any change.
-3. Accepted: GHL's invoice text and email use built-in templates that cannot be edited in this account, and there is no auto-pay-specific receipt. The member gets GHL's standard invoice text at close-out. The drink row's "Charged to your account" and the agreement clause (task 4) carry the explanation.
+3. Accepted: GHL's invoice text and email use built-in templates that cannot be edited in this account, and there is no auto-pay-specific receipt. The member gets GHL's standard invoice text at close-out, then the payment receipt. The drink row's "Charged to your account" and the agreement clause (task 4) carry the explanation. **Open (Johnny, 2026-09-26): members do not need the invoice text at all, since they authorized the charge and get a receipt.** The Worker does not send it and cannot stop it with the verified calls; whether GHL can suppress the invoice notification (a Payments setting, or a flag on the schedule body) is for the btt-ops side to test against the live account. If a flag on the create body does it, add it to step 4 and the fixtures; nothing else changes.
 4. Member agreement: a clause authorizing tab purchases to be charged to the card on file, saying they will get a weekly invoice text from BTT for their tab that is paid automatically, with nothing to do.
 5. `wrangler secret put PIN_PEPPER` (a long random string).
 6. Run `src/db/migrations/004_tab.sql` before the deploy that carries the tab.

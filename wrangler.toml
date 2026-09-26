@@ -39,6 +39,9 @@ TAB_ITEMS = "water,hydration"
 TAB_PROGRAMS = "adult"
 TAB_MIN_CENTS = "500"
 TAB_MAX_ROLL_DAYS = "28"
+# ET hour when the cron charges everyone who is due (the PIN was the
+# authorization). Blank turns the automatic run off; the staff button stays.
+TAB_AUTO_HOUR = "20"
 PUBLIC_ORIGIN = "https://checkin.bttbridgewater.com"
 
 # Waiver prompt (§15.1). The tag a signed waiver leaves on the student's

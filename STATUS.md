@@ -115,7 +115,11 @@ Built 2026-09-25, all seven steps of the build order in `CLAUDE.md` §15.3. The 
 
 **The first live close-out should be you alone**, with drinks worth $5 on your own tab, watched on the staff page. The response shapes from GHL were observed once, not documented, and the code reads them tolerantly; one real run through the review screen confirms them. If a row lands on "needs a look", read the note on it before pressing anything.
 
-Timing to expect: the invoice text arrives within minutes of the button; the charge lands later that day. The row reads "Charging on <day>" until then, and "Paid" once Check sees it. A row still unpaid the day after the charge day reads "Not paid, needs a look".
+Timing to expect: the invoice text arrives within minutes; the charge lands later that day. The row reads "Charging on <day>" until then, and "Paid" once it is seen. A row still unpaid the day after the charge day reads "Not paid, needs a look".
+
+**It runs itself.** Since 2026-09-26 the cron charges everyone who is due at 8 PM ET (`TAB_AUTO_HOUR` in `wrangler.toml`; blank makes it button-only). The PIN typed at the kiosk is the member's authorization, so nothing waits on a person. The Tab view says when the last run happened and what it did, and the review screen is still there to remove a wrong line before 8 PM, charge early, retry a row, or mark one Charged at POS. `/health` shows `lastTabRun` and `lastTabOutcome`; `degraded` means a row needs a look on the Tab view.
+
+Open on the GHL side: members get GHL's invoice text when the invoice generates, before the charge. You said they do not need it. The Worker cannot stop it; whether GHL can is for the btt-ops side to find in Payments settings or on the schedule body.
 
 What a member sees: after an adult checks in, the success screen asks "Thirsty?", shows `Water $1` and `Hydration $3`, and says in small print "Charged to your account." Tapping one asks for their 4-digit purchase PIN on a big keypad. A member with no PIN yet sees "Text me a setup link"; the Worker writes the link to the `purchase_pin_link` field and your GHL workflow texts it. The link opens `/pin`, where they pick the PIN. Kids never see any of this. A purchase is online only: if it does not reach the server, the screen says "That didn't go through. Nothing was added to your tab." and nothing is queued.
 
