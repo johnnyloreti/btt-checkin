@@ -520,6 +520,55 @@ test('autoHourFrom and the cron mapping', () => {
   assert.equal(isTabStartTick(new Date('2026-01-16T01:00:00Z'), TZ, 20), true);
 });
 
+test('a create that answers without an id: the row waits, a retry adopts the schedule by name, and never creates twice', async () => {
+  const { env, cfg } = await seeded();
+  await buy(env, cfg, 'c_dan', 'hydration', at(-DAY));
+  await buy(env, cfg, 'c_dan', 'hydration', at(-DAY));
+  const f = fakeGhl({ contacts: { c_dan: DAN }, transactions: { c_dan: [tx('t1', { pm: 'pm_dan' })] } });
+  const real = f.ghl.createSchedule;
+  // GHL creates it but answers with a shape the parser cannot read.
+  let hidden = null;
+  f.ghl.createSchedule = async (env2, body) => { const r = await real(env2, body); hidden = r.id; return { id: null, raw: { message: 'ok' }, keys: ['message'] }; };
+  const started = await startCloseout(env, cfg, ['c_dan'], NOW);
+  const cpId = started.payers[0].closeoutPayerId;
+  let r = await runPayer(env, f.ghl, cfg, cpId, NOW);
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, 'no_schedule_id');
+  assert.equal(r.row.state, 'pending');
+  assert.match(r.row.detail.error, /response keys: message/);
+  assert.equal(f.count('createSchedule'), 1);
+
+  // The cron leaves it alone.
+  const t = await tabTick(env, f.ghl, cfg, at(30 * 60_000), { start: false });
+  assert.equal(t.did, false);
+
+  // A retry finds the schedule by its exact name and carries on from there.
+  f.ghl.createSchedule = real;
+  r = await runPayer(env, f.ghl, cfg, cpId, at(31 * 60_000));
+  assert.equal(r.ok, true);
+  assert.equal(r.row.state, 'autopay_on');
+  assert.equal(r.row.scheduleId, hidden, 'adopted, not recreated');
+  assert.equal(f.count('createSchedule'), 1);
+});
+
+test('a create without an id whose schedule the search cannot find is flagged for a person, never recreated', async () => {
+  const { env, cfg } = await seeded();
+  await buy(env, cfg, 'c_dan', 'hydration', at(-DAY));
+  await buy(env, cfg, 'c_dan', 'hydration', at(-DAY));
+  const f = fakeGhl({ contacts: { c_dan: DAN }, transactions: { c_dan: [tx('t1', { pm: 'pm_dan' })] } });
+  let creates = 0;
+  f.ghl.createSchedule = async () => { creates += 1; return { id: null, raw: {}, keys: [] }; };
+  f.ghl.findSchedules = async () => [];
+  const started = await startCloseout(env, cfg, ['c_dan'], NOW);
+  const cpId = started.payers[0].closeoutPayerId;
+  await runPayer(env, f.ghl, cfg, cpId, NOW);
+  const r = await runPayer(env, f.ghl, cfg, cpId, at(60_000));
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, 'schedule_unfound');
+  assert.match(r.row.detail.attention, /not found by name/);
+  assert.equal(creates, 1);
+});
+
 test('tabTick: nothing to do is nothing done, and no log row', async () => {
   const { env, cfg } = await seeded();
   const f = fakeGhl({});
@@ -602,5 +651,10 @@ test('tabTick: a payer that throws is left with the error and retried next tick;
   // A row the state machine flagged for a person is not retried by the cron.
   env.DB.raw.prepare("UPDATE closeout_payers SET state = 'schedule_created', detail = ?").run(JSON.stringify({ attention: 'could not tell' }));
   r = await tabTick(env, f.ghl, cfg, at(60 * 60_000), { start: false });
+  assert.equal(r.did, false);
+  // Nor is one whose schedule was created without an id coming back: a blind
+  // retry could create a second schedule.
+  env.DB.raw.prepare("UPDATE closeout_payers SET state = 'pending', invoice_schedule_id = NULL, detail = ?").run(JSON.stringify({ error: 'schedule created but no id returned' }));
+  r = await tabTick(env, f.ghl, cfg, at(90 * 60_000), { start: false });
   assert.equal(r.did, false);
 });

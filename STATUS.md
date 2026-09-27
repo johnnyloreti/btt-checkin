@@ -19,7 +19,7 @@
 | Waiver prompt (§15.1) | `src/waiver.js`, `src/fields.js` | Field check on every roster sync; nudge failures in `sync_log` |
 | Stripe tab (§15.2) | `src/promotions.js` | Eligibility from attended classes since the last stripe |
 | Drink tab (§15.3), Phase 1 | `src/tab.js`, `src/pin.js`, `src/purchases.js`, `src/closeout.js`, `public/pin.html`, `tab-items.json` | Kiosk drink row, PIN by texted link, staff Tab view, review and charge through GHL invoices with saved-card auto-pay |
-| Tests | `test/` | `npm test`: 248 unit tests, no network. `npm run test:browser` needs Playwright |
+| Tests | `test/` | `npm test`: 251 unit tests, no network. `npm run test:browser` needs Playwright |
 
 ## Decisions made without you (confirm or say otherwise)
 
@@ -122,6 +122,8 @@ Timing to expect: the charge lands sometime the same day; the receipt email foll
 What the member gets: **one email, the receipt, after the charge.** Your decision on 2026-09-26. The advance "a payment of $X is due today" email is switched off account-wide at Payments → Invoices → Settings → Notifications → Customer Notifications → "Auto payment information" (a GHL setting, not the Worker; every other auto-pay invoice in the account loses that notice too). Receipts are a separate switch, Payments → Settings → Receipts, and stay on. No text at any point. Flipped and verified on 2026-09-26 (off after reload, receipts still on, nothing else touched). To undo: same screen, turn "Auto payment information" back on, Save.
 
 First automatic close-out, 2026-09-26 8 PM: opened for Johnny ($6) and then failed every tick on the first GHL call, `GET /invoices/schedule` answering 422 "offset should not be empty". The list routes want `limit` and `offset` as strings; fixed 2026-09-27, every list call sends both. Two lessons kept: the Tab summary and the close-out row now print the error text itself, and a row that keeps failing is retried safely because the schedule search by exact name runs before any create.
+
+Second live failure, same night: the create answered 2xx but the id was not at `_id`, `id` or `schedule._id`. Fixed 2026-09-27: the id is read from the usual wrapper keys two levels down (`pickId` in `src/ghl.js`), a miss names the response's top-level keys on the row, the cron leaves such a row alone, a retry adopts the schedule by exact name, and a row that created once and cannot find its schedule is flagged for a person rather than creating again. **If the shape is still unread after this deploy, the row's note lists the keys; send them.**
 
 What a member sees: after an adult checks in, the success screen asks "Thirsty?", shows `Water $1` and `Hydration $3`, and says in small print "Charged to your account." Tapping one asks for their 4-digit purchase PIN on a big keypad. A member with no PIN yet sees "Text me a setup link"; the Worker writes the link to the `purchase_pin_link` field and your GHL workflow texts it. The link opens `/pin`, where they pick the PIN. Kids never see any of this. A purchase is online only: if it does not reach the server, the screen says "That didn't go through. Nothing was added to your tab." and nothing is queued.
 

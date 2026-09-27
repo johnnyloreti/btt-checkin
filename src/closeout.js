@@ -255,6 +255,15 @@ export async function runPayer(env, ghl, cfg, closeoutPayerId, now) {
   }
 
   if (row.state === 'pending') {
+    // A row that already created a schedule once, without getting its id
+    // back, and that the search by exact name did not find, must not create
+    // again: the row is left for a person to find the schedule in GHL.
+    let prior = {};
+    try { prior = row.detail ? JSON.parse(row.detail) : {}; } catch { prior = {}; }
+    if (prior.createdOnce) {
+      await setState(env, row.id, 'pending', { detail: detailJson({ ...prior, attention: 'a schedule was created earlier but is not found by name; find it in GHL, then Charged at POS' }) }, now);
+      return { ok: false, reason: 'schedule_unfound', row: rowOut(await getPayerRow(env, row.id)) };
+    }
     // 2. contact details
     const contact = await contactForInvoice(ghl, env, payerId);
     if (contact.missing.length) {
@@ -287,7 +296,8 @@ export async function runPayer(env, ghl, cfg, closeoutPayerId, now) {
       items: lines.map((l) => ({ name: l.label, currency: 'USD', amount: l.amountCents / 100, qty: l.qty, productId: l.productId, priceId: l.priceId, type: 'one_time' })),
     });
     if (!created.id) {
-      await setState(env, row.id, 'pending', { detail: detailJson({ error: 'schedule created but no id returned; check GHL by name before retrying' }) }, now);
+      const keys = (created.keys || []).join(', ') || 'none';
+      await setState(env, row.id, 'pending', { detail: detailJson({ createdOnce: true, error: `schedule created but no id returned (response keys: ${keys}); Retry adopts it by name, or find it in GHL` }) }, now);
       return { ok: false, reason: 'no_schedule_id', row: rowOut(await getPayerRow(env, row.id)) };
     }
     await setState(env, row.id, 'schedule_created', { invoice_schedule_id: created.id }, now);
@@ -445,7 +455,9 @@ export async function tabTick(env, ghl, cfg, now, { start = false, budget = TICK
       if (left <= 0) break;
       if (p.state !== 'pending' && p.state !== 'schedule_created') continue;
       // A row a person has already been pointed at waits for that person.
-      if (p.detail && p.detail.attention) continue;
+      // `error` is the create-without-id case: retrying blind could create
+      // a second schedule, so it also waits for a person.
+      if (p.detail && (p.detail.attention || p.detail.error)) continue;
       left -= 1;
       out.did = true;
       try {

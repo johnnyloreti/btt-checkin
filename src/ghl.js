@@ -150,10 +150,28 @@ export async function ghlGetSchedule(env, scheduleId, fetchImpl = fetch) {
 }
 
 /** WRITE: create a one-time invoice schedule. Returns { id }. */
+/**
+ * The id of a created object, wherever the response put it. The live create
+ * answered 2xx on 2026-09-27 with the id somewhere other than `_id`, `id`
+ * or `schedule._id`, so this looks two levels down under the usual wrapper
+ * keys. `keys` names the top level so a miss can be read on the staff page.
+ */
+export function pickId(obj, depth = 0) {
+  if (!obj || typeof obj !== 'object' || depth > 2) return null;
+  for (const k of ['_id', 'id', 'scheduleId']) {
+    if (typeof obj[k] === 'string' && obj[k]) return obj[k];
+  }
+  for (const k of ['schedule', 'data', 'invoiceSchedule', 'invoice', 'result']) {
+    const v = pickId(obj[k], depth + 1);
+    if (v) return v;
+  }
+  return null;
+}
+
 export async function ghlCreateSchedule(env, body, fetchImpl = fetch) {
   const data = await ghlRequest(env, 'POST', '/invoices/schedule', { body: { ...loc(env), ...body }, fetchImpl });
-  const s = data && data.schedule ? data.schedule : data;
-  return { id: s && (s._id || s.id) ? String(s._id || s.id) : null, raw: s };
+  const id = pickId(data);
+  return { id: id ? String(id) : null, raw: data, keys: data && typeof data === 'object' ? Object.keys(data) : [] };
 }
 
 /** WRITE: turn on saved-card auto-pay and activate the schedule. */

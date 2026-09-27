@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fetchAllContacts, ghlRequest, GhlError, GHL_BASE, ghlFindSchedules, ghlListInvoices, ghlListTransactions } from '../src/ghl.js';
+import { fetchAllContacts, ghlRequest, GhlError, GHL_BASE, ghlFindSchedules, ghlListInvoices, ghlListTransactions, ghlCreateSchedule, pickId } from '../src/ghl.js';
 
 const ENV = { GHL_TOKEN: 'test-token', GHL_LOCATION_ID: 'LOC123' };
 
@@ -97,4 +97,21 @@ test('the list calls send limit and offset, which the invoice routes require (GH
     assert.match(u.searchParams.get('limit'), /^\d+$/);
   }
   assert.equal(calls[0].searchParams.get('search'), 'BTT tab #1-abcd');
+});
+
+test('a created schedule id is read wherever the response put it, and a miss names the keys', async () => {
+  assert.equal(pickId({ _id: 'a' }), 'a');
+  assert.equal(pickId({ id: 'b' }), 'b');
+  assert.equal(pickId({ schedule: { _id: 'c' } }), 'c');
+  assert.equal(pickId({ data: { schedule: { _id: 'd' } } }), 'd');
+  assert.equal(pickId({ invoiceSchedule: { id: 'e' } }), 'e');
+  assert.equal(pickId({ scheduleId: 'f' }), 'f');
+  assert.equal(pickId({ status: 'ok', _id: 42 }), null, 'a number is not an id');
+  assert.equal(pickId({ deep: { deeper: { deepest: { _id: 'no' } } } }), null);
+  const impl = async () => Response.json({ traceId: 't', schedule: { _id: 'sch_1', name: 'x' } });
+  const r = await ghlCreateSchedule(ENV, { name: 'x' }, impl);
+  assert.equal(r.id, 'sch_1');
+  const miss = await ghlCreateSchedule(ENV, { name: 'x' }, async () => Response.json({ traceId: 't', message: 'ok' }));
+  assert.equal(miss.id, null);
+  assert.deepEqual(miss.keys, ['traceId', 'message']);
 });
