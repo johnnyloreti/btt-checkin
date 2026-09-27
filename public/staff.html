@@ -608,7 +608,7 @@
       ? 'Charging is by the button only.'
       : `Charges run at ${formatTime(`${String(data.autoHour).padStart(2, '0')}:00`)} for anyone who is due.`;
     const last = data.lastRun
-      ? ` Last run ${fmtDate(data.lastRun.ranAt.slice(0, 10))} ${fmtClock(data.lastRun.ranAt)}: ${data.lastRun.started} started, ${data.lastRun.advanced} charged, ${data.lastRun.refreshed} checked${data.lastRun.errors.length ? `, ${data.lastRun.errors.length} need a look` : ''}.`
+      ? ` Last run ${fmtDate(data.lastRun.ranAt.slice(0, 10))} ${fmtClock(data.lastRun.ranAt)}: ${data.lastRun.started} started, ${data.lastRun.advanced} charged, ${data.lastRun.refreshed} checked${data.lastRun.errors.length ? `, ${data.lastRun.errors.length} need a look: ${data.lastRun.errors.join('; ')}` : ''}.`
       : '';
     $('tab-summary').textContent = `${open.length} open line${open.length === 1 ? '' : 's'} today, ${data.openTotal}. ${data.activity.failedToday} wrong PIN${data.activity.failedToday === 1 ? '' : 's'} today. ${autoNote}${last}`;
     for (const l of data.activity.locked) {

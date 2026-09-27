@@ -562,7 +562,7 @@ export function createApp(schedule, deps = defaultDeps(), opts = {}) {
                 closeoutPayerId: r.closeoutPayerId, closeoutId: r.closeoutId, id: await opaqueId(r.payerId, salt),
                 first: r.first, last: r.last, amountCents: r.amountCents, total: r.total, invoiceName: r.invoiceName,
                 state: r.state, card: r.card, invoiceId: r.invoiceId, updatedAt: r.updatedAt,
-                chargeDay: d.chargeDay || null, invoiceStatus: d.invoiceStatus || null, note: d.attention || d.note || d.error || null,
+                chargeDay: d.chargeDay || null, invoiceStatus: d.invoiceStatus || null, note: d.attention || d.note || d.error || d.lastError || null,
                 missing: d.missing || null, pos: d.pos || null,
               };
             };

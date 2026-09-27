@@ -475,6 +475,12 @@ test('routes: a GHL failure mid-step answers 502 with where the row got to, and 
   const body = await res.json();
   assert.match(body.error, /503/);
   assert.equal(body.row.state, 'schedule_created');
+  // The cron's retry leaves the same error on the row; the close-out screen shows it.
+  await tabTick(env, f.ghl, cfg, at(30 * 60_000), { start: false });
+  const seen = await (await staff('/api/staff/tab/closeout')).json();
+  assert.match(seen.payers[0].note, /GHL 503/);
+  const today = await (await staff('/api/staff/tab/today')).json();
+  assert.match(today.lastRun.errors[0], /Dan Kim: GHL 503/);
   f.ghl.activateSchedule = real;
   const again = await (await staff('/api/staff/tab/closeout/run', { method: 'POST', body: { closeoutPayerId: cpId } })).json();
   assert.equal(again.row.state, 'autopay_on');
