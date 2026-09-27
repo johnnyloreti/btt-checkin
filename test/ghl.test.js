@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fetchAllContacts, ghlRequest, GhlError, GHL_BASE } from '../src/ghl.js';
+import { fetchAllContacts, ghlRequest, GhlError, GHL_BASE, ghlFindSchedules, ghlListInvoices, ghlListTransactions } from '../src/ghl.js';
 
 const ENV = { GHL_TOKEN: 'test-token', GHL_LOCATION_ID: 'LOC123' };
 
@@ -81,4 +81,20 @@ test('fetchAllContacts refuses to page forever', async () => {
     return Response.json({ contacts: [{ id: `x${n}` }], meta: { startAfterId: `x${n}` } });
   };
   await assert.rejects(() => fetchAllContacts(ENV, { fetchImpl: impl, maxPages: 5 }), /exceeded 5 pages/);
+});
+
+test('the list calls send limit and offset, which the invoice routes require (GHL 422 otherwise)', async () => {
+  const calls = [];
+  const impl = async (url) => { calls.push(new URL(url)); return Response.json({ schedules: [], invoices: [], data: [] }); };
+  await ghlFindSchedules(ENV, 'BTT tab #1-abcd', impl);
+  await ghlListInvoices(ENV, 'c_1', impl);
+  await ghlListTransactions(ENV, 'c_1', impl);
+  assert.equal(calls.length, 3);
+  for (const u of calls) {
+    assert.equal(u.searchParams.get('altId'), 'LOC123');
+    assert.equal(u.searchParams.get('altType'), 'location');
+    assert.equal(u.searchParams.get('offset'), '0');
+    assert.match(u.searchParams.get('limit'), /^\d+$/);
+  }
+  assert.equal(calls[0].searchParams.get('search'), 'BTT tab #1-abcd');
 });

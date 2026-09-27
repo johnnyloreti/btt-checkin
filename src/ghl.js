@@ -127,7 +127,7 @@ export async function ghlGetContact(env, contactId, fetchImpl = fetch) {
 }
 
 export async function ghlListTransactions(env, contactId, fetchImpl = fetch) {
-  const data = await ghlRequest(env, 'GET', '/payments/transactions', { params: { ...loc(env), contactId, limit: 100 }, fetchImpl });
+  const data = await ghlRequest(env, 'GET', '/payments/transactions', { params: { ...loc(env), contactId, limit: '100', offset: '0' }, fetchImpl });
   return list(data, 'data', 'transactions');
 }
 
@@ -136,8 +136,11 @@ export async function ghlGetTransaction(env, transactionId, fetchImpl = fetch) {
 }
 
 /** Schedules whose name contains `search` (any part of it; the caller filters for an exact match). */
+// The invoice list routes validate `limit` and `offset` as required strings
+// (GHL 422 "offset should not be empty", seen live 2026-09-27 on the first
+// automatic close-out). Every list call sends both.
 export async function ghlFindSchedules(env, search, fetchImpl = fetch) {
-  const data = await ghlRequest(env, 'GET', '/invoices/schedule', { params: { ...loc(env), search, limit: 20 }, fetchImpl });
+  const data = await ghlRequest(env, 'GET', '/invoices/schedule', { params: { ...loc(env), search, limit: '20', offset: '0' }, fetchImpl });
   return list(data, 'schedules', 'data');
 }
 
@@ -162,7 +165,7 @@ export async function ghlActivateSchedule(env, scheduleId, autoPayment, fetchImp
 }
 
 export async function ghlListInvoices(env, contactId, fetchImpl = fetch) {
-  const data = await ghlRequest(env, 'GET', '/invoices/', { params: { ...loc(env), contactId, limit: 50 }, fetchImpl });
+  const data = await ghlRequest(env, 'GET', '/invoices/', { params: { ...loc(env), contactId, limit: '50', offset: '0' }, fetchImpl });
   return list(data, 'invoices', 'data');
 }
 
