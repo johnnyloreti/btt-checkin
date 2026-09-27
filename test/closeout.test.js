@@ -453,9 +453,12 @@ test('routes: review, card, start, run, refresh, pos; opaque ids and no card ids
   assert.equal(check.row.invoiceStatus, 'sent');
   assert.equal(check.row.invoiceId, 'inv_1');
 
+  // A stale flag left on a charging row from an earlier attempt is not shown.
+  env.DB.raw.prepare("UPDATE closeout_payers SET detail = json_set(detail, '$.attention', 'could not tell') WHERE id = ?").run(cpId);
   const status = await (await staff('/api/staff/tab/closeout')).json();
   assert.equal(status.done, false);
   assert.equal(status.payers[0].state, 'autopay_on');
+  assert.equal(status.payers[0].note, null);
 
   const pos = await (await staff('/api/staff/tab/closeout/pos', { method: 'POST', body: { closeoutPayerId: cpId, note: 'desk' } })).json();
   assert.equal(pos.row.state, 'paid_at_pos');
@@ -655,6 +658,12 @@ test('tabTick: a payer that throws is left with the error and retried next tick;
   env.DB.raw.prepare("UPDATE closeout_payers SET state = 'schedule_created', detail = ?").run(JSON.stringify({ attention: 'could not tell' }));
   r = await tabTick(env, f.ghl, cfg, at(60 * 60_000), { start: false });
   assert.equal(r.did, false);
+  // A person's retry that gets through drops the stale flag from the row.
+  const cp = env.DB.raw.prepare('SELECT id FROM closeout_payers').get().id;
+  const done = await runPayer(env, f.ghl, cfg, cp, at(61 * 60_000));
+  assert.equal(done.row.state, 'autopay_on');
+  assert.equal(done.row.detail.attention, undefined, 'stale note cleared');
+  assert.equal(done.row.detail.lastError, undefined);
   // Nor is one whose schedule was created without an id coming back: a blind
   // retry could create a second schedule.
   env.DB.raw.prepare("UPDATE closeout_payers SET state = 'pending', invoice_schedule_id = NULL, detail = ?").run(JSON.stringify({ error: 'schedule created but no id returned' }));

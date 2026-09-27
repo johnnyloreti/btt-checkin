@@ -375,9 +375,11 @@ async function activate(env, ghl, row, now, { fresh }) {
 
 async function finishActivated(env, row, now, detail) {
   const day = localParts(new Date(now.getTime() + EXECUTE_DELAY_MS), 'America/New_York').date;
+  // Flags from earlier attempts are over once the row is charging.
+  const { attention, error, lastError, at, ...kept } = detail || {};
   await env.DB.batch([
     env.DB.prepare("UPDATE closeout_payers SET state = 'autopay_on', updated_at = ?, detail = ? WHERE id = ?")
-      .bind(iso(now), detailJson({ ...detail, chargeDay: day }), row.id),
+      .bind(iso(now), detailJson({ ...kept, chargeDay: day }), row.id),
     env.DB.prepare("UPDATE purchases SET status = 'invoiced', closeout_payer_id = ? WHERE payer_contact_id = ? AND status = 'open'")
       .bind(row.id, row.payer_contact_id),
   ]);

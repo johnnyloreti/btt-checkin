@@ -558,11 +558,13 @@ export function createApp(schedule, deps = defaultDeps(), opts = {}) {
             const salt = requireSalt(env);
             const safeRow = async (r) => {
               const d = r.detail || {};
+              // A flag from an earlier attempt is over once the row is charging or paid.
+              const charging = r.state === 'autopay_on' || r.state === 'paid' || r.state === 'paid_at_pos';
               return {
                 closeoutPayerId: r.closeoutPayerId, closeoutId: r.closeoutId, id: await opaqueId(r.payerId, salt),
                 first: r.first, last: r.last, amountCents: r.amountCents, total: r.total, invoiceName: r.invoiceName,
                 state: r.state, card: r.card, invoiceId: r.invoiceId, updatedAt: r.updatedAt,
-                chargeDay: d.chargeDay || null, invoiceStatus: d.invoiceStatus || null, note: d.attention || d.note || d.error || d.lastError || null,
+                chargeDay: d.chargeDay || null, invoiceStatus: d.invoiceStatus || null, note: charging ? (d.note || null) : (d.attention || d.note || d.error || d.lastError || null),
                 missing: d.missing || null, pos: d.pos || null,
               };
             };
