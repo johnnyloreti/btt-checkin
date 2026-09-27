@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fetchAllContacts, ghlRequest, GhlError, GHL_BASE, ghlFindSchedules, ghlListInvoices, ghlListTransactions, ghlCreateSchedule, pickId } from '../src/ghl.js';
+import { fetchAllContacts, ghlRequest, GhlError, GHL_BASE, ghlFindSchedules, ghlListInvoices, ghlListTransactions, ghlCreateSchedule, pickId, unwrap, ghlGetSchedule } from '../src/ghl.js';
 
 const ENV = { GHL_TOKEN: 'test-token', GHL_LOCATION_ID: 'LOC123' };
 
@@ -114,4 +114,13 @@ test('a created schedule id is read wherever the response put it, and a miss nam
   const miss = await ghlCreateSchedule(ENV, { name: 'x' }, async () => Response.json({ traceId: 't', message: 'ok' }));
   assert.equal(miss.id, null);
   assert.deepEqual(miss.keys, ['traceId', 'message']);
+});
+
+test('a schedule read is unwrapped from the usual wrapper keys', async () => {
+  assert.deepEqual(unwrap({ schedule: { _id: 'a', status: 'active' } }), { _id: 'a', status: 'active' });
+  assert.deepEqual(unwrap({ data: { _id: 'b' } }), { _id: 'b' });
+  assert.deepEqual(unwrap({ _id: 'c', status: 'draft' }), { _id: 'c', status: 'draft' });
+  assert.deepEqual(unwrap({ data: [1] }), { data: [1] }, 'a list is not the object');
+  const s = await ghlGetSchedule(ENV, 'sch_1', async () => Response.json({ traceId: 't', invoiceSchedule: { _id: 'sch_1', status: 'scheduled' } }));
+  assert.equal(s.status, 'scheduled');
 });

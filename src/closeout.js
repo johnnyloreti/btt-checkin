@@ -225,6 +225,15 @@ async function getPayerRow(env, id) {
  * treats null as "do not touch it", because a second activation is the
  * failure that cannot be undone and a missed one can be closed at the POS.
  */
+/** What a schedule read says about itself, for a note a person will read. */
+export function describeSchedule(s) {
+  if (!s || typeof s !== 'object') return `no schedule object, got ${s === null ? 'null' : typeof s}`;
+  const status = pickField(s, 'status', 'scheduleStatus');
+  const auto = pickField(s, 'autoPayment.enable', 'autoPayment.enabled');
+  const keys = Object.keys(s).slice(0, 12).join(', ');
+  return `status ${status === undefined ? 'missing' : JSON.stringify(status)}, autoPayment.enable ${auto === undefined ? 'missing' : JSON.stringify(auto)}, keys: ${keys || 'none'}`;
+}
+
 export function scheduleIsActive(s) {
   if (!s || typeof s !== 'object') return null;
   const status = String(s.status || s.scheduleStatus || '').toLowerCase();
@@ -338,7 +347,10 @@ async function activate(env, ghl, row, now, { fresh }) {
       return { ok: true, row: rowOut(await getPayerRow(env, row.id)) };
     }
     if (active === null) {
-      await setState(env, row.id, 'schedule_created', { detail: detailJson({ ...detail, attention: 'could not tell whether the schedule is active; check it in GHL, then Charged at POS or retry' }) }, now);
+      // Say what was read, so an unknown status word can be added to
+      // scheduleIsActive after a person has checked the schedule in GHL.
+      const seen = describeSchedule(s);
+      await setState(env, row.id, 'schedule_created', { detail: detailJson({ ...detail, attention: `could not tell whether the schedule is active (${seen}); check it in GHL, then Charged at POS or retry` }) }, now);
       return { ok: false, reason: 'unknown_schedule_state', row: rowOut(await getPayerRow(env, row.id)) };
     }
     if (!detail.customerId || !detail.paymentMethodId) {

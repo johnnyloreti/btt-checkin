@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   chargeDecision, reviewPayers, findCard, payerCardStatus, startCloseout, runPayer, refreshPayer, markPaidAtPos,
-  latestCloseout, closeoutPayers, invoiceName, executeAtFor, scheduleIsActive, BUSINESS_NAME, tabTick,
+  latestCloseout, closeoutPayers, invoiceName, executeAtFor, scheduleIsActive, describeSchedule, BUSINESS_NAME, tabTick,
 } from '../src/closeout.js';
 import { recordPurchase } from '../src/purchases.js';
 import { tabConfig, loadTabItems } from '../src/tab.js';
@@ -158,6 +158,9 @@ test('executeAtFor has no milliseconds; invoiceName; scheduleIsActive reads what
   assert.equal(scheduleIsActive({ status: 'scheduled', autoPayment: { enable: false } }), false);
   assert.equal(scheduleIsActive({ foo: 1 }), null);
   assert.equal(scheduleIsActive(null), null);
+  assert.equal(describeSchedule({ _id: 'x', status: 'paused', autoPayment: { enable: 'yes' } }), 'status "paused", autoPayment.enable "yes", keys: _id, status, autoPayment');
+  assert.equal(describeSchedule({ foo: 1 }), 'status missing, autoPayment.enable missing, keys: foo');
+  assert.equal(describeSchedule(null), 'no schedule object, got null');
 });
 
 test('startCloseout takes only payers who are due, and writes every row before any GHL call', async () => {

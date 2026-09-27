@@ -144,9 +144,18 @@ export async function ghlFindSchedules(env, search, fetchImpl = fetch) {
   return list(data, 'schedules', 'data');
 }
 
+/** The object under the usual wrapper keys, or the response itself. */
+export function unwrap(data) {
+  if (!data || typeof data !== 'object') return data;
+  for (const k of ['schedule', 'data', 'invoiceSchedule', 'invoice']) {
+    if (data[k] && typeof data[k] === 'object' && !Array.isArray(data[k])) return data[k];
+  }
+  return data;
+}
+
 export async function ghlGetSchedule(env, scheduleId, fetchImpl = fetch) {
   const data = await ghlRequest(env, 'GET', `/invoices/schedule/${encodeURIComponent(scheduleId)}`, { params: loc(env), fetchImpl });
-  return data && data.schedule ? data.schedule : data;
+  return unwrap(data);
 }
 
 /** WRITE: create a one-time invoice schedule. Returns { id }. */
