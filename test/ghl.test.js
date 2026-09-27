@@ -121,6 +121,10 @@ test('a schedule read is unwrapped from the usual wrapper keys', async () => {
   assert.deepEqual(unwrap({ data: { _id: 'b' } }), { _id: 'b' });
   assert.deepEqual(unwrap({ _id: 'c', status: 'draft' }), { _id: 'c', status: 'draft' });
   assert.deepEqual(unwrap({ data: [1] }), { data: [1] }, 'a list is not the object');
+  // The live shape: the schedule at the top level, with its own schedule.executeAt inside.
+  const live = { _id: 'sch_live', status: 'draft', autoPayment: { enable: false }, schedule: { executeAt: '2026-09-27T02:10:00Z' } };
+  assert.equal(unwrap(live), live, 'never dives into schedule.executeAt');
+  assert.equal(unwrap({ status: 'draft', schedule: { executeAt: 'x' } }).status, 'draft');
   const s = await ghlGetSchedule(ENV, 'sch_1', async () => Response.json({ traceId: 't', invoiceSchedule: { _id: 'sch_1', status: 'scheduled' } }));
   assert.equal(s.status, 'scheduled');
 });

@@ -144,11 +144,20 @@ export async function ghlFindSchedules(env, search, fetchImpl = fetch) {
   return list(data, 'schedules', 'data');
 }
 
-/** The object under the usual wrapper keys, or the response itself. */
+/**
+ * The entity in a response: the response itself when it carries an id or a
+ * status, else the first wrapper key that does. A schedule carries its own
+ * `schedule: { executeAt }` sub-object (the create body's shape), so a blind
+ * dive into `schedule` lands on that and loses `status`; seen live
+ * 2026-09-27, the reason the first activation stopped.
+ */
 export function unwrap(data) {
   if (!data || typeof data !== 'object') return data;
+  const looksLikeEntity = (o) => o && typeof o === 'object' && !Array.isArray(o)
+    && (typeof o._id === 'string' || typeof o.id === 'string' || typeof o.status === 'string');
+  if (looksLikeEntity(data)) return data;
   for (const k of ['schedule', 'data', 'invoiceSchedule', 'invoice']) {
-    if (data[k] && typeof data[k] === 'object' && !Array.isArray(data[k])) return data[k];
+    if (looksLikeEntity(data[k])) return data[k];
   }
   return data;
 }
@@ -198,5 +207,5 @@ export async function ghlListInvoices(env, contactId, fetchImpl = fetch) {
 
 export async function ghlGetInvoice(env, invoiceId, fetchImpl = fetch) {
   const data = await ghlRequest(env, 'GET', `/invoices/${encodeURIComponent(invoiceId)}`, { params: loc(env), fetchImpl });
-  return data && data.invoice ? data.invoice : data;
+  return unwrap(data);
 }
