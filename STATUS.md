@@ -172,6 +172,8 @@ Deploying before step 1 is safe: every kid falls back to the old behaviour, and 
 
 One thing not verified: that the GHL contact list returns each contact's custom fields. If `payerLinks.field` reads "unreadable: the contact list carries no custom fields" after a sync, tell me; the fix is a different read.
 
+Done 2026-09-29: steps 1 and 2 (field `waiver_reminder_for`, workflow "Check-In: Kid waiver reminder", published, SMS and email). Not done: `payer_contact_id` does not exist in GHL yet, so step 3 is open and no kid is linked. Open question: a parent signing the public waiver form signs as themselves, so the `waiver-signed` tag likely lands on the parent, not the kid; see §15.1 in the brief.
+
 The drink-tab half of Phase 1b (kids buying on a parent's tab with the parent's PIN) is not built.
 
 ## Still open after go-live
