@@ -300,16 +300,16 @@ await step('tab: the day\'s lines with a total, remove with confirm, a locked me
   assert.match(await page.locator('#tab-summary').textContent(), /2 open lines today, \$4\. 2 wrong PINs today\./);
   const rows = await page.locator('#tab-list .row').allTextContents();
   assert.equal(rows.length, 2);
-  assert.match(rows[0], /Dan Kim.*Hydration \$3.*staff/);
+  assert.match(rows[0], /Dan Kim.*LMNT \$3.*staff/);
   assert.match(rows[1], /Dan Kim.*Water \$1/);
   assert.match(await page.locator('#tab-activity').textContent(), /Dan Kim.*locked/);
   await page.screenshot({ path: join(OUT, 'staff-tab.png') });
 
-  await page.click('#tab-list .row:has-text("Hydration") .remove');
-  assert.equal(await page.locator('#tab-list .row:has-text("Hydration") .remove').textContent(), 'Confirm remove');
-  await page.click('#tab-list .row:has-text("Hydration") .remove');
+  await page.click('#tab-list .row:has-text("LMNT") .remove');
+  assert.equal(await page.locator('#tab-list .row:has-text("LMNT") .remove').textContent(), 'Confirm remove');
+  await page.click('#tab-list .row:has-text("LMNT") .remove');
   await page.waitForFunction(() => /1 open line today, \$1\./.test(document.getElementById('tab-summary').textContent));
-  assert.match((await page.locator('#tab-list .row').allTextContents())[0], /Hydration.*removed/);
+  assert.match((await page.locator('#tab-list .row').allTextContents())[0], /LMNT.*removed/);
   assert.equal(env.DB.raw.prepare("SELECT status FROM purchases WHERE item_key = 'hydration'").get().status, 'voided');
 
   await page.click('#tab-activity .remove');
@@ -328,7 +328,7 @@ await step('member screen: the tab section, and Set up PIN hands over a setup li
   assert.match(await page.locator('#member-tab-actions').textContent(), /Purchase PIN set/);
   const lines = await page.locator('#member-tab-list .row').allTextContents();
   assert.equal(lines.length, 2);
-  assert.match(lines[0], /Hydration \$3.*removed/);
+  assert.match(lines[0], /LMNT \$3.*removed/);
   assert.match(lines[1], /Water \$1/);
 
   await page.click('#member-pin-setup');
@@ -378,7 +378,7 @@ await step('close-out: review shows the card or the reason, then one confirm cha
   assert.equal(row.state, 'autopay_on');
   assert.equal(row.invoice_schedule_id, 'sch_1');
   assert.equal(ghlState.schedules[0].name, row.invoice_name);
-  assert.deepEqual(ghlState.schedules[0].items.map((i) => [i.name, i.qty, i.amount]), [['Water', 1, 1], ['Hydration', 2, 3]]);
+  assert.deepEqual(ghlState.schedules[0].items.map((i) => [i.name, i.qty, i.amount]), [['Water', 1, 1], ['LMNT', 2, 3]]);
   assert.equal(ghlState.active.sch_1.autoPayment.paymentMethodId, 'pm_dan');
   assert.equal(env.DB.raw.prepare("SELECT COUNT(*) AS n FROM purchases WHERE payer_contact_id = 'c_dan' AND status = 'invoiced'").get().n, 3);
   assert.equal(env.DB.raw.prepare("SELECT status FROM purchases WHERE payer_contact_id = 'c_maria'").get().status, 'open', 'María rolled');

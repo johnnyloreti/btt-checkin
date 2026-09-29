@@ -210,7 +210,7 @@ test('runPayer, the happy path: contact, card, create, activate, lines invoiced'
   assert.equal(create.currency, 'USD');
   assert.deepEqual(create.discount, { type: 'percentage', value: 0 });
   assert.deepEqual(create.items, [
-    { name: 'Hydration', currency: 'USD', amount: 3, qty: 1, productId: ITEMS.hydration.product_id, priceId: ITEMS.hydration.price_id, type: 'one_time' },
+    { name: 'LMNT', currency: 'USD', amount: 3, qty: 1, productId: ITEMS.hydration.product_id, priceId: ITEMS.hydration.price_id, type: 'one_time' },
     { name: 'Water', currency: 'USD', amount: 1, qty: 2, productId: ITEMS.water.product_id, priceId: ITEMS.water.price_id, type: 'one_time' },
   ]);
   const activate = f.calls.find((c) => c.name === 'activateSchedule');
@@ -670,3 +670,4 @@ test('tabTick: a payer that throws is left with the error and retried next tick;
   r = await tabTick(env, f.ghl, cfg, at(90 * 60_000), { start: false });
   assert.equal(r.did, false);
 });
+

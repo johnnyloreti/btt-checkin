@@ -180,6 +180,12 @@ The drink-tab half of Phase 1b (kids buying on a parent's tab with the parent's 
 
 Learned 2026-09-29. The kiosk page never reloads its own code; it only re-fetches the roster every 10 minutes. An iPad left in Guided Access kept a copy from before the drink tab shipped, so check-ins worked but no drinks ever showed. After any deploy that changes the kiosk: leave Guided Access, close the app (or pull down to reload in Safari), reopen, and check yourself in. A self-updating kiosk is offered, not built.
 
+## Drinks, 2026-09-29
+
+Kiosk drinks: Water $1, LMNT $3 (was "Hydration"; same GHL product), Gatorade $2. The drink buttons now wrap two per row.
+
+**Gatorade's GHL ids are made up**, as you asked. Every tab charge sends each line's product and price ids to GHL, and GHL will most likely reject an invoice carrying ids it does not know. So the first nightly charge for someone with a Gatorade on their tab will probably fail: their row shows the error on Review and charge, and until that row is settled the next night's close-out does not start for anyone. To settle it: Charged at POS on that row. To prevent it: create a "Gatorade" product at $2 in GHL (Payments, Products), send me its product id and price id, and redeploy. Gatorade lines bought before the swap keep the made-up ids, so settle those with Charged at POS.
+
 ## Still open after go-live
 
 - Rotate `STAFF_PIN`; the first one was pasted into a chat.

@@ -579,7 +579,9 @@ TAB_MAX_ROLL_DAYS = "28"
 }
 ```
 
-These ids are real: the btt-ops session created both products through the GHL API on 2026-09-25 and read the ids from the responses ("Water" $1 and "Hydration Drink" $3, both PHYSICAL, available in store). The kiosk label is "Hydration".
+These ids are real: the btt-ops session created both products through the GHL API on 2026-09-25 and read the ids from the responses ("Water" $1 and "Hydration Drink" $3, both PHYSICAL, available in store). The kiosk label was "Hydration"; **renamed "LMNT" by Johnny on 2026-09-29** (label only; the key `hydration` and the GHL product stay).
+
+**Gatorade, $2, added 2026-09-29 (Johnny).** Its `product_id` and `price_id` in `tab-items.json` are **random**, at Johnny's instruction ("create random ids"); no such product exists in GHL. They go into the invoice at close-out, so the first charge that includes a Gatorade will most likely be rejected by GHL, that payer's row will show the error, and the unfinished close-out holds up the next night's charges for everyone until the row is resolved (Charged at POS, or real ids and Retry). **Replace both ids with the real ones from a GHL product before the first Gatorade is charged.** Open purchases are stored with the ids at purchase time, so Gatorade lines bought before the swap keep the random ids.
 
 #### Minimum charge (Johnny, 2026-09-25)
 

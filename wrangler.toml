@@ -35,7 +35,7 @@ STRIPE_PROGRAMS = "kids-3-5,kids-6-9,kids-10-14"
 # A payer is charged when their open tab reaches TAB_MIN_CENTS or their oldest
 # open purchase is TAB_MAX_ROLL_DAYS old. PUBLIC_ORIGIN is the host in the PIN
 # setup link texted to members; behind the Netlify proxy the Worker cannot see it.
-TAB_ITEMS = "water,hydration"
+TAB_ITEMS = "water,hydration,gatorade"
 TAB_PROGRAMS = "adult"
 TAB_MIN_CENTS = "500"
 TAB_MAX_ROLL_DAYS = "28"

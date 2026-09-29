@@ -47,7 +47,7 @@ test('recordPurchase copies price and ids at the moment of purchase, and refuses
   assert.equal(row.purchased_at, NOW.toISOString());
   assert.deepEqual(await recordPurchase(env, cfg, { buyerId: 'c_dan', payerId: 'c_dan', itemKey: 'soda', method: 'kiosk', now: NOW }), { ok: false, reason: 'unknown_item' });
   const h = await recordPurchase(env, cfg, { buyerId: 'c_dan', payerId: 'c_dan', itemKey: 'hydration', method: 'staff', now: NOW });
-  assert.equal(h.message, 'Added to your tab. Hydration, $3.');
+  assert.equal(h.message, 'Added to your tab. LMNT, $3.');
 });
 
 test('purchasesBetween, voidPurchase and memberTab', async () => {
@@ -59,7 +59,7 @@ test('purchasesBetween, voidPurchase and memberTab', async () => {
   await recordPurchase(env, cfg, { buyerId: 'c_maria', payerId: 'c_maria', itemKey: 'water', method: 'staff', now: at(-86_400_000) });
 
   const today = await purchasesBetween(env, cfg, NOW.toISOString(), at(3600_000).toISOString());
-  assert.deepEqual(today.map((r) => [r.first, r.label, r.amountCents, r.status]), [['Dan', 'Hydration', 300, 'open'], ['Dan', 'Water', 100, 'open']]);
+  assert.deepEqual(today.map((r) => [r.first, r.label, r.amountCents, r.status]), [['Dan', 'LMNT', 300, 'open'], ['Dan', 'Water', 100, 'open']]);
   assert.equal(today[0].purchaseId, b.purchaseId);
 
   assert.deepEqual(await voidPurchase(env, a.purchaseId), { ok: true, purchaseId: a.purchaseId, changed: 1 });
@@ -70,9 +70,9 @@ test('purchasesBetween, voidPurchase and memberTab', async () => {
   env.DB.raw.prepare("UPDATE purchases SET status = 'open' WHERE id = ?").run(b.purchaseId);
 
   const tab = await memberTab(env, cfg, 'c_dan');
-  assert.deepEqual(tab.open.map((r) => r.label), ['Hydration']);
+  assert.deepEqual(tab.open.map((r) => r.label), ['LMNT']);
   assert.equal(tab.openCents, 300);
-  assert.deepEqual(tab.recent.map((r) => [r.label, r.status]), [['Hydration', 'open'], ['Water', 'voided']]);
+  assert.deepEqual(tab.recent.map((r) => [r.label, r.status]), [['LMNT', 'open'], ['Water', 'voided']]);
   assert.equal(tab.noCard, false);
 
   // A label survives the item leaving the config.
@@ -111,7 +111,7 @@ async function setup({ tabOn = true, noTab = false } = {}) {
 test('the check-in response carries the drink row for an adult, and nothing for a kid, a teen in both, or a staff add', async () => {
   const { env, call, checkin, id } = await setup();
   const before = await checkin('c_dan');
-  assert.deepEqual(before.tab, { items: [{ key: 'water', label: 'Water', amountCents: 100, price: '$1' }, { key: 'hydration', label: 'Hydration', amountCents: 300, price: '$3' }], hasPin: false, locked: false });
+  assert.deepEqual(before.tab, { items: [{ key: 'water', label: 'Water', amountCents: 100, price: '$1' }, { key: 'hydration', label: 'LMNT', amountCents: 300, price: '$3' }], hasPin: false, locked: false });
   await givePin(env, 'c_dan');
   const after = await checkin('c_dan');
   assert.equal(after.duplicate, true, 'a duplicate check-in still carries the row');
@@ -212,7 +212,7 @@ test("staff today: the day's lines with names and prices, PIN activity, and a to
   const d = await res.json();
   assert.equal(d.enabled, true);
   assert.equal(d.date, '2026-09-24');
-  assert.deepEqual(d.purchases.map((p) => [p.first, p.label, p.price, p.method, p.status]), [['María', 'Hydration', '$3', 'staff', 'open'], ['Dan', 'Water', '$1', 'kiosk', 'open']]);
+  assert.deepEqual(d.purchases.map((p) => [p.first, p.label, p.price, p.method, p.status]), [['María', 'LMNT', '$3', 'staff', 'open'], ['Dan', 'Water', '$1', 'kiosk', 'open']]);
   assert.equal(d.purchases[0].id, await id('c_maria'), 'opaque id, never the GHL id');
   assert.ok(!('buyerId' in d.purchases[0]) && !('payerId' in d.purchases[0]));
   assert.equal(d.openCents, 400);
