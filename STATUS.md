@@ -176,6 +176,10 @@ Done 2026-09-29: steps 1 and 2 (field `waiver_reminder_for`, workflow "Check-In:
 
 The drink-tab half of Phase 1b (kids buying on a parent's tab with the parent's PIN) is not built.
 
+## After every deploy: reload the iPad
+
+Learned 2026-09-29. The kiosk page never reloads its own code; it only re-fetches the roster every 10 minutes. An iPad left in Guided Access kept a copy from before the drink tab shipped, so check-ins worked but no drinks ever showed. After any deploy that changes the kiosk: leave Guided Access, close the app (or pull down to reload in Safari), reopen, and check yourself in. A self-updating kiosk is offered, not built.
+
 ## Still open after go-live
 
 - Rotate `STAFF_PIN`; the first one was pasted into a chat.
