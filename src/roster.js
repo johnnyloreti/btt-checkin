@@ -134,6 +134,9 @@ export function buildRoster(contacts, cfg) {
   const members = [];
   const flagged = [];
   const notStudents = [];
+  // Every contact by id, so a kid's payer can be looked up in the same list.
+  const byId = new Map();
+  for (const c of contacts) if (c && c.id) byId.set(c.id, c);
   for (const c of contacts) {
     if (!c || !c.id) continue;
     const { isMember, programs, flag, notStudent, waiver } = classifyContact(c, cfg);
@@ -157,7 +160,24 @@ export function buildRoster(contacts, cfg) {
       if (raw && looksLikeContactId(raw) && raw !== c.id) payer = raw;
       else if (raw && raw !== c.id) flagged.push({ id: c.id, name: displayName(c), reason: `payer link is not a contact id: ${raw.slice(0, 40)}` });
     }
-    members.push({ ghl_contact_id: c.id, first_name: first, last_name: last, programs, waiver: waiver ? 1 : 0, payer_contact_id: payer });
+    // When the link could not be read this run, the one stored last time
+    // still stands, so a failed field read never flips a kid to "no waiver".
+    const linked = cfg.payerFieldId ? payer : (cfg.storedLinks && cfg.storedLinks.get(c.id)) || null;
+    // A parent signs the one agreement on behalf of their child, so the
+    // signed copy, and the waiver tag, land on the parent (Johnny,
+    // 2026-09-29). A kid counts as signed when their linked payer carries
+    // the tag, unless that payer trains here: a training parent's tag may be
+    // their own agreement as the participant, which says nothing about the kid.
+    let signed = waiver;
+    let viaPayer = false;
+    if (!signed && cfg.waiverTag && linked) {
+      const p = byId.get(linked);
+      if (p && normTags(p).includes(cfg.waiverTag) && !classifyContact(p, cfg).isMember) {
+        signed = true;
+        viaPayer = true;
+      }
+    }
+    members.push({ ghl_contact_id: c.id, first_name: first, last_name: last, programs, waiver: signed ? 1 : 0, waiverViaPayer: viaPayer, payer_contact_id: payer });
   }
   return { members, flagged, notStudents };
 }
@@ -245,6 +265,17 @@ export async function syncRoster(env, schedule, deps) {
       payerState = `unreadable: ${String(e && e.message ? e.message : e)}`;
     }
   }
+  // Links not read this run: fall back to the ones stored, for the waiver.
+  if (payerState !== 'ok' && payerKey && cfg.waiverTag) {
+    try {
+      if (await hasPayerColumn(env)) {
+        const { results } = await db.prepare('SELECT ghl_contact_id, payer_contact_id FROM members WHERE payer_contact_id IS NOT NULL').all();
+        cfg.storedLinks = new Map(results.map((r) => [r.ghl_contact_id, r.payer_contact_id]));
+      }
+    } catch {
+      cfg.storedLinks = null;
+    }
+  }
   const { members, flagged, notStudents } = buildRoster(contacts, cfg);
 
   if (members.length === 0) {
@@ -295,6 +326,7 @@ export async function syncRoster(env, schedule, deps) {
       notStudents: notStudents.length,
       removed,
       waiverMissing: cfg.waiverTag ? members.filter((m) => !m.waiver).length : null,
+      waiverViaPayer: cfg.waiverTag ? members.filter((m) => m.waiverViaPayer).length : null,
       payerLinks: payerLinksDetail(payerState, members, withPayer),
       flagged: flagged.map((f) => `${f.name}: ${f.reason}`),
     };

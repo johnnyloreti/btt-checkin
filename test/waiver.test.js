@@ -362,3 +362,53 @@ test('before migration 005: check-in, sync and lookup all work, links are not st
   assert.match(h.error, /005_payer\.sql/);
   assert.equal(h.schemaCurrent, false);
 });
+
+// ---- A parent's signature covers the kid (Johnny, 2026-09-29) ----
+
+// Paula pays for Emma and does not train; she signed. Dan trains and signed
+// his own agreement; he is linked as Nora's payer. Nobody signed for Leo.
+const PAULA = { id: 'parentPaula01', firstName: 'Paula', lastName: 'Payer', tags: ['founding-member', 'program:none', 'waiver-signed'] };
+const DAN_ID = 'danKimAdult01';
+const FAMILIES = [
+  ...WITH_WAIVERS.filter((c) => c.id !== 'c_dan').map((c) => {
+    if (c.id === 'c_emma') return { ...c, customFields: [{ id: 'f_pc', value: PAULA.id }] };
+    if (c.id === 'c_newkid') return { ...c, customFields: [{ id: 'f_pc', value: DAN_ID }] };
+    if (c.id === 'c_leo') return { ...c, customFields: [{ id: 'f_pc', value: 'parentNoSign01' }] };
+    return { ...c, customFields: [] };
+  }),
+  PAULA,
+  { id: DAN_ID, firstName: 'Dan', lastName: 'Kim', tags: ['foundations-oct', 'program:adult', 'waiver-signed'], customFields: [] },
+  { id: 'parentNoSign01', firstName: 'Pat', lastName: 'Unsigned', tags: ['program:none'], customFields: [] },
+];
+
+test("a kid counts as signed when their non-training parent carries the tag, not when a training parent does", async () => {
+  const { DB, sync, post, nudges, waited, id } = await linkedSetup({ contacts: FAMILIES });
+  const w = Object.fromEntries(DB.raw.prepare('SELECT ghl_contact_id, waiver FROM members').all().map((r) => [r.ghl_contact_id, r.waiver]));
+  assert.equal(w.c_emma, 1, 'Paula signed on her behalf');
+  assert.equal(w.c_newkid, 0, "Dan's tag is his own agreement");
+  assert.equal(w.c_leo, 0, 'Pat never signed');
+  assert.equal(w[DAN_ID], 1, 'Dan himself is signed');
+  assert.equal(w.parentPaula01, undefined, 'a program:none parent is never a member row');
+  assert.equal(sync.waiverViaPayer, 1);
+
+  // Emma is no longer prompted or nudged; Leo still is, and to his parent.
+  const emma = await (await post('/api/checkin', { contactId: await id('c_emma'), className: 'Kids 6-9', classStartLocal: '2026-09-05T11:00' })).json();
+  assert.equal(emma.waiverNeeded, false);
+  const leo = await (await post('/api/checkin', { contactId: await id('c_leo'), className: 'Kids 10-14', classStartLocal: '2026-09-05T11:45' })).json();
+  assert.equal(leo.waiverNeeded, true);
+  await Promise.all(waited);
+  assert.deepEqual(nudges.map((n) => [n.contactId, n.opts.payerId]), [['c_leo', 'parentNoSign01']]);
+});
+
+test('a failed field read keeps a kid signed through the stored link, and a parent losing the tag unsigns the kid', async () => {
+  const { env, DB } = await linkedSetup({ contacts: FAMILIES });
+  resetFieldCache();
+  await syncRoster(env, schedule, { fetchContacts: async () => ({ contacts: FAMILIES, pages: 1 }), fetchFields: async () => { throw new Error('GHL 503'); }, now: new Date() });
+  assert.equal(DB.raw.prepare("SELECT waiver FROM members WHERE ghl_contact_id = 'c_emma'").get().waiver, 1, 'stored link used');
+
+  resetFieldCache();
+  const unsigned = FAMILIES.map((c) => (c.id === PAULA.id ? { ...c, tags: ['founding-member', 'program:none'] } : c));
+  await syncRoster(env, schedule, { fetchContacts: async () => ({ contacts: unsigned, pages: 1 }), fetchFields: async () => FIELDS, now: new Date() });
+  assert.equal(DB.raw.prepare("SELECT waiver FROM members WHERE ghl_contact_id = 'c_emma'").get().waiver, 0);
+  resetFieldCache();
+});

@@ -19,7 +19,7 @@
 | Waiver prompt (§15.1) | `src/waiver.js`, `src/fields.js` | Field check on every roster sync; nudge failures in `sync_log` |
 | Stripe tab (§15.2) | `src/promotions.js` | Eligibility from attended classes since the last stripe |
 | Drink tab (§15.3), Phase 1 | `src/tab.js`, `src/pin.js`, `src/purchases.js`, `src/closeout.js`, `public/pin.html`, `tab-items.json` | Kiosk drink row, PIN by texted link, staff Tab view, review and charge through GHL invoices with saved-card auto-pay |
-| Tests | `test/` | `npm test`: 262 unit tests, no network. `npm run test:browser` needs Playwright |
+| Tests | `test/` | `npm test`: 264 unit tests, no network. `npm run test:browser` needs Playwright |
 
 ## Decisions made without you (confirm or say otherwise)
 
@@ -172,7 +172,7 @@ Deploying before step 1 is safe: every kid falls back to the old behaviour, and 
 
 One thing not verified: that the GHL contact list returns each contact's custom fields. If `payerLinks.field` reads "unreadable: the contact list carries no custom fields" after a sync, tell me; the fix is a different read.
 
-Done 2026-09-29: steps 1 and 2 (field `waiver_reminder_for`, workflow "Check-In: Kid waiver reminder", published, SMS and email). Not done: `payer_contact_id` does not exist in GHL yet, so step 3 is open and no kid is linked. Open question: a parent signing the public waiver form signs as themselves, so the `waiver-signed` tag likely lands on the parent, not the kid; see §15.1 in the brief.
+Done 2026-09-29: steps 1 and 2 (field `waiver_reminder_for`, workflow "Check-In: Kid waiver reminder", published, SMS and email). Not done: `payer_contact_id` does not exist in GHL yet, so step 3 is open and no kid is linked. Answered 2026-09-29: the parent signs the one agreement on the kid's behalf, so the tag lands on the parent. The roster sync now counts a kid as signed when their linked parent carries `waiver-signed` and that parent does not train here. A parent who trains signs for themselves too, so their tag does not count for the kid: tag that kid by hand. Siblings: one signature counts for every kid linked to that parent, because the tag does not say which child the agreement names. `waiverViaPayer` in the roster sync detail says how many kids are signed this way.
 
 The drink-tab half of Phase 1b (kids buying on a parent's tab with the parent's PIN) is not built.
 
