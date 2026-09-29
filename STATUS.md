@@ -19,7 +19,7 @@
 | Waiver prompt (§15.1) | `src/waiver.js`, `src/fields.js` | Field check on every roster sync; nudge failures in `sync_log` |
 | Stripe tab (§15.2) | `src/promotions.js` | Eligibility from attended classes since the last stripe |
 | Drink tab (§15.3), Phase 1 | `src/tab.js`, `src/pin.js`, `src/purchases.js`, `src/closeout.js`, `public/pin.html`, `tab-items.json` | Kiosk drink row, PIN by texted link, staff Tab view, review and charge through GHL invoices with saved-card auto-pay |
-| Tests | `test/` | `npm test`: 252 unit tests, no network. `npm run test:browser` needs Playwright |
+| Tests | `test/` | `npm test`: 262 unit tests, no network. `npm run test:browser` needs Playwright |
 
 ## Decisions made without you (confirm or say otherwise)
 
@@ -152,6 +152,27 @@ Tune in `wrangler.toml`: `TAB_ITEMS` (blank turns the whole thing off), `TAB_PRO
 **Platform limits, recorded as unverified.** The build order asked for Cloudflare's current subrequest and CPU limits to be checked first. This container's network proxy blocks `developers.cloudflare.com`, so they could not be read here. The design assumes, from memory: 50 outbound calls per request on Workers Free, and that D1 queries count toward that. Nothing built so far comes near it (a purchase is a handful of D1 queries and no GHL call; a setup link is one GHL write). The close-out is designed for one payer per request so it stays under it whatever the exact number. Please open that page once and paste the two numbers; they go here. WebCrypto HMAC-SHA256, which the PIN uses, was exercised in Node's implementation of the same API and is the same primitive the opaque ids have used since day one.
 
 Known limit, not part of this work: the nightly rollup pushes every pending contact in one cron invocation, one GHL call each. Fine at today's numbers; it will need batching before the roster is in the dozens of pending contacts a night.
+
+## Kids' waiver reminders go to the parent (§15.1, Phase 1b), 2026-09-29
+
+The waiver reminder for a kid used to be written on the kid's own contact, which usually has no phone or email, so it reached nobody. Now, when the kid has a parent linked, it goes to the parent.
+
+How it works: every roster sync reads the contact field `payer_contact_id` on each member (the btt-ops side fills it on kids) and remembers it. When a kid without a waiver checks in and a parent is linked, the Worker writes `waiver_reminder_for` **on the parent's contact**, e.g. "Jack Silva, checked in Tue Sep 29", and your GHL workflow texts or emails the parent. At most one reminder per kid per day. A kid with no parent linked is handled exactly as before.
+
+Where to look: `/health` → `payerLinks` shows whether the links were read, how many members are linked, and up to ten kids with no parent linked. The staff member screen says "Reminders go to: Parent on file", or "No parent linked" in gold for a kid without one. A reminder that could not reach a linked parent is counted in `waiverFailures24h` with the reason.
+
+Setup, in this order:
+1. GHL: create the contact field **`waiver_reminder_for`** (single line text). If you want another name, change `WAIVER_PAYER_FIELD` in `wrangler.toml` to match.
+2. GHL: workflow **"Check-In: Kid waiver reminder"**: trigger Contact Changed on `waiver_reminder_for`; If/Else "`waiver_reminder_for` is not empty"; then SMS (and/or email) to the contact, for example: "Hi {{contact.first_name}}, we don't have a signed waiver yet for {{contact.waiver_reminder_for}}. It takes a minute: <waiver link>". No exclamation points.
+3. btt-ops: fill `payer_contact_id` on each kid with the parent's GHL contact id.
+4. Run migration 005, then deploy (commands at the end of this session's message).
+5. After the next roster sync, open `/health`: `payerLinks.field` should be `ok` and `missingFields` empty.
+
+Deploying before step 1 is safe: every kid falls back to the old behaviour, and `/health` goes red naming `waiver_reminder_for` until it exists. Deploying before the migration is also safe: nothing is stored, reminders go where they went before, and `/health` names `005_payer.sql`.
+
+One thing not verified: that the GHL contact list returns each contact's custom fields. If `payerLinks.field` reads "unreadable: the contact list carries no custom fields" after a sync, tell me; the fix is a different read.
+
+The drink-tab half of Phase 1b (kids buying on a parent's tab with the parent's PIN) is not built.
 
 ## Still open after go-live
 

@@ -437,6 +437,11 @@
     fact('Lifetime', `Class #${d.lifetime}`, true);
     fact('Status', d.active ? 'Active' : 'Inactive');
     fact('Waiver', d.waiver ? 'On file' : 'Missing', !d.waiver);
+    if (d.payerLinked !== null && d.payerLinked !== undefined) {
+      const kid = (d.programs || []).some((p) => p.startsWith('kids-'));
+      if (d.payerLinked) fact('Reminders go to', 'Parent on file');
+      else if (kid) fact('Reminders go to', 'No parent linked', true);
+    }
     fact('Roster synced', d.syncedAt ? `${fmtDate(d.syncedAt.slice(0, 10))} ${fmtClock(d.syncedAt)}` : 'never');
     fact('GHL rollup', d.rollupPending ? 'Pending tonight' : 'Up to date');
     renderPromotions(d, m);

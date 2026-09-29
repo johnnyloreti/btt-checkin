@@ -49,6 +49,13 @@ PUBLIC_ORIGIN = "https://checkin.bttbridgewater.com"
 # GHL workflow can send the reminder. Empty WAIVER_TAG turns the feature off.
 WAIVER_TAG = "waiver-signed"
 WAIVER_FIELD = "checkin_last_at"
+# Kids (§15.3 Phase 1b): the contact field on a kid holding the payer's
+# contact id (set by the btt-ops side), and the field written on that payer
+# instead of on the kid, e.g. "Jack Silva, checked in Tue Sep 29". A kid with
+# no payer linked, or either field blank, falls back to WAIVER_FIELD on the
+# kid as before.
+PAYER_FIELD = "payer_contact_id"
+WAIVER_PAYER_FIELD = "waiver_reminder_for"
 
 # One trigger every 30 minutes drives both jobs. The handler runs the
 # roster sync on every tick and the rollup on the tick that is 03:00 ET.

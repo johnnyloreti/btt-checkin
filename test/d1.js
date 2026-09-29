@@ -14,15 +14,17 @@ const SCHEMA = readRepoFile('src/db/schema.sql');
  *   legacy: true        members without the waiver column (002)
  *   noPromotions: true  no promotions table (003)
  *   noTab: true         none of the drink-tab tables (004)
+ *   noPayer: true       members without payer_contact_id (005)
  *
  * Used to prove that a deploy running ahead of its migration degrades
  * instead of breaking.
  */
-export function memoryD1({ legacy = false, noPromotions = false, noTab = false } = {}) {
+export function memoryD1({ legacy = false, noPromotions = false, noTab = false, noPayer = false } = {}) {
   resetSchemaCaps();
   const db = new DatabaseSync(':memory:');
   db.exec(SCHEMA);
   if (legacy) db.exec('ALTER TABLE members DROP COLUMN waiver');
+  if (legacy || noPayer) db.exec('ALTER TABLE members DROP COLUMN payer_contact_id');
   if (noPromotions) db.exec('DROP TABLE promotions');
   if (noTab) for (const t of TAB_TABLES) db.exec(`DROP TABLE ${t}`);
 

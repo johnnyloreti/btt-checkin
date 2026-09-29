@@ -3,7 +3,7 @@
 
 import { classesOn, UNSCHEDULED_CLASS, START_LOCAL_RE, shiftDate } from './classes.js';
 import { localParts } from './time.js';
-import { hasWaiverColumn } from './schema-caps.js';
+import { hasWaiverColumn, hasPayerColumn } from './schema-caps.js';
 import { backdateFromEnv } from './checkin.js';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -87,7 +87,11 @@ export async function voidAttendance(env, attendanceId) {
 
 /** Member lookup: last 30 days, lifetime count, sync status. Read-only. */
 export async function memberHistory(env, schedule, contactId, now) {
-  const cols = (await hasWaiverColumn(env)) ? 'programs, active, synced_at, waiver' : 'programs, active, synced_at';
+  const extra = [];
+  if (await hasWaiverColumn(env)) extra.push('waiver');
+  const payerCol = await hasPayerColumn(env);
+  if (payerCol) extra.push('payer_contact_id');
+  const cols = ['programs', 'active', 'synced_at', ...extra].join(', ');
   const member = await env.DB.prepare(
     `SELECT ghl_contact_id, first_name, last_name, ${cols} FROM members WHERE ghl_contact_id = ?`,
   )
@@ -120,6 +124,9 @@ export async function memberHistory(env, schedule, contactId, now) {
     programLabels: programs.filter((p) => schedule.programs[p]).map((p) => schedule.programs[p].label),
     active: Number(member.active) === 1,
     waiver: Number(member.waiver ?? 1) === 1,
+    // Whether a parent is linked to receive this member's reminders
+    // (Phase 1b). null when the column is not there yet. Never the id.
+    payerLinked: payerCol ? Boolean(member.payer_contact_id) : null,
     syncedAt: member.synced_at,
     rollupPending: pending ? pending.queued_at : null,
     lifetime: Number(lifetime?.n ?? 0),

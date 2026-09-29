@@ -8,8 +8,8 @@ import {
 } from './ghl.js';
 import { reviewPayers, payerCardStatus, startCloseout, runPayer, refreshPayer, markPaidAtPos, latestCloseout, closeoutPayers, tabTick } from './closeout.js';
 import { runRollup } from './rollup.js';
-import { notifyWaiverCheckin, waiverEnabled, logWaiverFailure } from './waiver.js';
-import { hasWaiverColumn, hasPromotionsTable, hasTabTables } from './schema-caps.js';
+import { notifyWaiverCheckin, waiverEnabled, logWaiverFailure, payerFieldKey } from './waiver.js';
+import { hasWaiverColumn, hasPromotionsTable, hasTabTables, hasPayerColumn } from './schema-caps.js';
 import { tabConfig, canBuy } from './tab.js';
 import { createSetupToken, readSetupToken, completeSetup, clearLockout, pinActivity, writePinLink, requirePepper } from './pin.js';
 import { hasNoCardFlag, recordPurchase, purchasesBetween, voidPurchase, memberTab, clearNoCardFlag } from './purchases.js';
@@ -55,6 +55,7 @@ export async function health(env, schedule, now = new Date(), opts = {}) {
     missingFields: null,
     waiverFailures24h: null,
     waiverLastFailure: null,
+    payerLinks: null,
     schemaCurrent: null,
     schedulePresent: Boolean(schedule && Array.isArray(schedule.classes) && schedule.classes.length > 0),
     tab: null,
@@ -83,6 +84,8 @@ export async function health(env, schedule, now = new Date(), opts = {}) {
       try {
         const detail = last.detail ? JSON.parse(last.detail) : {};
         out.missingFields = Array.isArray(detail.missingFields) ? detail.missingFields : null;
+        // Which kids have a parent linked for their waiver reminder (Phase 1b).
+        out.payerLinks = detail.payerLinks || null;
       } catch {
         out.missingFields = null;
       }
@@ -114,6 +117,7 @@ export async function health(env, schedule, now = new Date(), opts = {}) {
     const problems = [];
     if (!(await hasWaiverColumn(env))) problems.push('members.waiver missing: run src/db/migrations/002_waiver.sql');
     if (stripesEnabled(env) && !(await hasPromotionsTable(env))) problems.push('promotions table missing: run src/db/migrations/003_promotions.sql');
+    if (payerFieldKey(env) && !(await hasPayerColumn(env))) problems.push('members.payer_contact_id missing: run src/db/migrations/005_payer.sql');
     // The tab (§15.3): off, on, or misconfigured, and whether its tables exist.
     const tab = tabConfig(env, opts.tabItems || {});
     const tabSchema = await hasTabTables(env);
@@ -169,9 +173,12 @@ export async function publicRoster(env, schedule) {
 export async function resolveMember(env, id) {
   if (typeof id !== 'string' || !/^[0-9a-f]{20}$/.test(id)) return null;
   const salt = requireSalt(env);
-  // waiver is optional: never name it unless the migration has run (see schema-caps.js).
-  const cols = (await hasWaiverColumn(env)) ? 'ghl_contact_id, first_name, last_name, programs, active, waiver' : 'ghl_contact_id, first_name, last_name, programs, active';
-  const { results } = await env.DB.prepare(`SELECT ${cols} FROM members`).all();
+  // waiver and payer_contact_id are optional: never name them unless their
+  // migrations have run (see schema-caps.js).
+  const cols = ['ghl_contact_id', 'first_name', 'last_name', 'programs', 'active'];
+  if (await hasWaiverColumn(env)) cols.push('waiver');
+  if (await hasPayerColumn(env)) cols.push('payer_contact_id');
+  const { results } = await env.DB.prepare(`SELECT ${cols.join(', ')} FROM members`).all();
   const map = await buildIdMap(results, salt);
   return map.get(id) || null;
 }
@@ -231,12 +238,13 @@ export function defaultDeps() {
         putContact: (id, fields) => ghlPutContactCustomFields(env, id, fields),
         now,
       }),
-    notifyWaiver: (env, contactId, now) =>
+    notifyWaiver: (env, contactId, now, opts) =>
       notifyWaiverCheckin(
         env,
         { fetchFields: () => fetchCustomFieldIds(env), putContact: (id, fields) => ghlPutContactCustomFields(env, id, fields) },
         contactId,
         now,
+        opts,
       ),
     ghl: ghlBundle(),
     runTab: (env, cfg, now, opts) => tabTick(env, ghlBundle(), cfg, now, opts),
@@ -305,7 +313,13 @@ export function createApp(schedule, deps = defaultDeps(), opts = {}) {
       }
     }
     if (waiverNeeded && !result.body.duplicate && deps.notifyWaiver) {
-      const task = deps.notifyWaiver(env, member.ghl_contact_id, at).then(async (r) => {
+      // A kid's reminder goes to the payer when one is linked (Phase 1b).
+      const nudgeOpts = {
+        payerId: member.payer_contact_id || null,
+        name: `${member.first_name || ''} ${member.last_name || ''}`.trim(),
+        tz: env.TZ || tz,
+      };
+      const task = deps.notifyWaiver(env, member.ghl_contact_id, at, nudgeOpts).then(async (r) => {
         if (r.ok) return;
         // Recorded, not just warned: a nudge that did not land is a reminder
         // that will not go out, and console.warn hid exactly this for weeks.

@@ -9,7 +9,8 @@ CREATE TABLE IF NOT EXISTS members (
   programs       TEXT NOT NULL,   -- JSON array of program keys, e.g. ["kids-6-9"]
   active         INTEGER NOT NULL DEFAULT 1,
   synced_at      TEXT NOT NULL,
-  waiver         INTEGER NOT NULL DEFAULT 1   -- 1 = waiver tag present or feature off (§15.1)
+  waiver         INTEGER NOT NULL DEFAULT 1,  -- 1 = waiver tag present or feature off (§15.1)
+  payer_contact_id TEXT                       -- parent who pays, from PAYER_FIELD (§15.3 Phase 1b); NULL = self
 );
 
 CREATE TABLE IF NOT EXISTS attendance (

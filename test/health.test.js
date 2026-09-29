@@ -41,6 +41,7 @@ test('/health reports counts and last roster sync', async () => {
     missingFields: null,
     waiverFailures24h: 0,
     waiverLastFailure: null,
+    payerLinks: null,
     schemaCurrent: true,
     schedulePresent: true,
     tab: { enabled: false, schema: false, error: null },

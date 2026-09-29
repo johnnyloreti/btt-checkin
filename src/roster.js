@@ -1,8 +1,10 @@
 // roster.js — turn GHL contacts into the members table.
 // Rules from §6. Pure functions first, then the sync that touches D1.
 
-import { hasWaiverColumn } from './schema-caps.js';
+import { hasWaiverColumn, hasPayerColumn } from './schema-caps.js';
 import { checkRequiredFields } from './fields.js';
+import { getFieldIds } from './rollup.js';
+import { payerFieldKey, looksLikeContactId } from './waiver.js';
 
 /**
  * A contact with this tag is a paying family member who does not train:
@@ -96,6 +98,26 @@ export function tidyName(name) {
   return s.replace(/(^|[\s'-])(\p{L})/gu, (m, sep, ch) => sep + ch.toUpperCase());
 }
 
+/**
+ * One custom field's value on a contact from GET /contacts/, or null.
+ * Read tolerantly: the list carries `customFields` (or `customField` on
+ * older shapes) as [{ id, value }], and the value key has varied.
+ */
+export function contactFieldValue(contact, fieldId) {
+  if (!contact || !fieldId) return null;
+  const list = Array.isArray(contact.customFields) ? contact.customFields : Array.isArray(contact.customField) ? contact.customField : [];
+  const hit = list.find((f) => f && String(f.id) === String(fieldId));
+  if (!hit) return null;
+  const v = hit.value ?? hit.field_value ?? hit.fieldValue ?? null;
+  const s = v === null || v === undefined ? '' : String(v).trim();
+  return s || null;
+}
+
+/** True when a contact came back with a custom-field list at all. */
+function carriesFields(contact) {
+  return Boolean(contact) && (Array.isArray(contact.customFields) || Array.isArray(contact.customField));
+}
+
 function displayName(contact) {
   const first = tidyName(contact.firstName);
   const last = tidyName(contact.lastName);
@@ -127,9 +149,38 @@ export function buildRoster(contacts, cfg) {
       continue;
     }
     if (flag) flagged.push({ id: c.id, name: displayName(c), reason: flag });
-    members.push({ ghl_contact_id: c.id, first_name: first, last_name: last, programs, waiver: waiver ? 1 : 0 });
+    // §15.3 Phase 1b: who pays for this member, when the btt-ops side has
+    // linked one. A value that is not a contact id is flagged, not used.
+    let payer = null;
+    if (cfg.payerFieldId) {
+      const raw = contactFieldValue(c, cfg.payerFieldId);
+      if (raw && looksLikeContactId(raw) && raw !== c.id) payer = raw;
+      else if (raw && raw !== c.id) flagged.push({ id: c.id, name: displayName(c), reason: `payer link is not a contact id: ${raw.slice(0, 40)}` });
+    }
+    members.push({ ghl_contact_id: c.id, first_name: first, last_name: last, programs, waiver: waiver ? 1 : 0, payer_contact_id: payer });
   }
   return { members, flagged, notStudents };
+}
+
+/**
+ * How many members have a payer linked, and which kids do not. Kids are the
+ * members in a kids-* program; a kid without a payer gets reminders on their
+ * own contact, which is usually unreachable. `field` says whether the links
+ * were read this run: 'ok', 'off', 'missing in GHL', or 'unreadable: why'.
+ * When they were not read, the counts are null rather than zero (§0.6).
+ */
+export function payerLinksDetail(state, members, written) {
+  if (state !== 'ok') return { field: state, stored: false, linked: null, kidsWithout: null, kidsWithoutNames: null };
+  const kids = members.filter((m) => m.programs.some((p) => p.startsWith('kids-')));
+  const without = kids.filter((m) => !m.payer_contact_id);
+  return {
+    field: 'ok',
+    stored: written,
+    linked: members.filter((m) => m.payer_contact_id).length,
+    kids: kids.length,
+    kidsWithout: without.length,
+    kidsWithoutNames: without.slice(0, 10).map((m) => `${m.first_name} ${m.last_name}`.trim()),
+  };
 }
 
 async function logSync(db, job, ranAt, outcome, detail) {
@@ -174,6 +225,26 @@ export async function syncRoster(env, schedule, deps) {
   }
 
   const contacts = fetched.contacts || [];
+
+  // §15.3 Phase 1b: the payer link lives in a contact custom field. Its id
+  // comes from the same cached field list the field check uses. Links are
+  // written only when they could actually be read: a field GHL does not
+  // have, a field list that could not be fetched, or a contact list that
+  // carries no custom fields at all leaves every existing link as it was,
+  // rather than wiping them all to "no payer".
+  const payerKey = payerFieldKey(env);
+  let payerState = payerKey ? 'unreadable' : 'off';
+  if (payerKey && deps.fetchFields) {
+    try {
+      const fieldMap = await getFieldIds(deps.fetchFields, now);
+      const id = fieldMap.get(payerKey);
+      if (!id) payerState = 'missing in GHL';
+      else if (!contacts.some(carriesFields)) payerState = 'unreadable: the contact list carries no custom fields';
+      else { payerState = 'ok'; cfg.payerFieldId = id; }
+    } catch (e) {
+      payerState = `unreadable: ${String(e && e.message ? e.message : e)}`;
+    }
+  }
   const { members, flagged, notStudents } = buildRoster(contacts, cfg);
 
   if (members.length === 0) {
@@ -187,33 +258,25 @@ export async function syncRoster(env, schedule, deps) {
   }
 
   try {
-    // waiver is optional until the migration runs (see schema-caps.js).
+    // waiver and payer_contact_id are optional until their migrations run
+    // (see schema-caps.js); payer is also left alone when it was unreadable.
     const withWaiver = await hasWaiverColumn(env);
+    const withPayer = payerState === 'ok' && (await hasPayerColumn(env));
+    const cols = ['ghl_contact_id', 'first_name', 'last_name', 'programs', 'synced_at'];
+    if (withWaiver) cols.push('waiver');
+    if (withPayer) cols.push('payer_contact_id');
+    const updates = cols.filter((c) => c !== 'ghl_contact_id').map((c) => `${c} = excluded.${c}`);
     const upsert = db.prepare(
-      withWaiver
-        ? `INSERT INTO members (ghl_contact_id, first_name, last_name, programs, active, synced_at, waiver)
-           VALUES (?, ?, ?, ?, 1, ?, ?)
-           ON CONFLICT(ghl_contact_id) DO UPDATE SET
-             first_name = excluded.first_name,
-             last_name  = excluded.last_name,
-             programs   = excluded.programs,
-             active     = 1,
-             synced_at  = excluded.synced_at,
-             waiver     = excluded.waiver`
-        : `INSERT INTO members (ghl_contact_id, first_name, last_name, programs, active, synced_at)
-           VALUES (?, ?, ?, ?, 1, ?)
-           ON CONFLICT(ghl_contact_id) DO UPDATE SET
-             first_name = excluded.first_name,
-             last_name  = excluded.last_name,
-             programs   = excluded.programs,
-             active     = 1,
-             synced_at  = excluded.synced_at`,
+      `INSERT INTO members (${cols.join(', ')}, active)
+       VALUES (${cols.map(() => '?').join(', ')}, 1)
+       ON CONFLICT(ghl_contact_id) DO UPDATE SET ${updates.join(', ')}, active = 1`,
     );
-    const stmts = members.map((m) =>
-      withWaiver
-        ? upsert.bind(m.ghl_contact_id, m.first_name, m.last_name, JSON.stringify(m.programs), ranAt, m.waiver)
-        : upsert.bind(m.ghl_contact_id, m.first_name, m.last_name, JSON.stringify(m.programs), ranAt),
-    );
+    const stmts = members.map((m) => {
+      const vals = [m.ghl_contact_id, m.first_name, m.last_name, JSON.stringify(m.programs), ranAt];
+      if (withWaiver) vals.push(m.waiver);
+      if (withPayer) vals.push(m.payer_contact_id);
+      return upsert.bind(...vals);
+    });
     // Anyone not touched this run has lost their member tags.
     stmts.push(db.prepare('UPDATE members SET active = 0 WHERE synced_at <> ? AND active = 1').bind(ranAt));
     const deactivateIdx = stmts.length - 1;
@@ -232,6 +295,7 @@ export async function syncRoster(env, schedule, deps) {
       notStudents: notStudents.length,
       removed,
       waiverMissing: cfg.waiverTag ? members.filter((m) => !m.waiver).length : null,
+      payerLinks: payerLinksDetail(payerState, members, withPayer),
       flagged: flagged.map((f) => `${f.name}: ${f.reason}`),
     };
 

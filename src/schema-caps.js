@@ -14,6 +14,7 @@ const UNKNOWN = null;
 let waiverColumn = UNKNOWN;
 let promotionsTable = UNKNOWN;
 let tabTables = UNKNOWN;
+let payerColumn = UNKNOWN;
 
 /** The seven tables migration 004 creates (§15.3). All or nothing. */
 export const TAB_TABLES = ['purchase_pins', 'pin_setup_tokens', 'pin_failures', 'purchases', 'closeouts', 'closeout_payers', 'tab_flags'];
@@ -61,8 +62,23 @@ export async function hasTabTables(env) {
   return tabTables;
 }
 
+/** True when members.payer_contact_id exists (migration 005). Cached per isolate. */
+export async function hasPayerColumn(env) {
+  if (payerColumn !== UNKNOWN) return payerColumn;
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT name FROM pragma_table_info('members') WHERE name = 'payer_contact_id'",
+    ).all();
+    payerColumn = results.length > 0;
+  } catch {
+    payerColumn = false;
+  }
+  return payerColumn;
+}
+
 /** Test hook, and a way to re-check after a migration without a redeploy. */
 export function resetSchemaCaps() {
+  payerColumn = UNKNOWN;
   waiverColumn = UNKNOWN;
   promotionsTable = UNKNOWN;
   tabTables = UNKNOWN;

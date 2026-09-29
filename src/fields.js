@@ -9,7 +9,7 @@
 // reminder ever went out.
 
 import { FIELD_KEYS, getFieldIds, resetFieldCache } from './rollup.js';
-import { waiverEnabled, waiverFieldKey } from './waiver.js';
+import { waiverEnabled, waiverFieldKey, waiverPayerFieldKey } from './waiver.js';
 import { parseList } from './roster.js';
 import { PIN_LINK_FIELD } from './pin.js';
 
@@ -19,6 +19,9 @@ export function requiredFieldKeys(env = {}) {
   if (waiverEnabled(env)) {
     const key = waiverFieldKey(env);
     if (key && !keys.includes(key)) keys.push(key);
+    // Kids' reminders go to the payer in a field of their own (§15.1, Phase 1b).
+    const payerKey = waiverPayerFieldKey(env);
+    if (payerKey && !keys.includes(payerKey)) keys.push(payerKey);
   }
   // The drink tab (§15.3) writes the PIN setup link. Required as soon as the
   // tab is switched on, so /health goes red before the first member taps.

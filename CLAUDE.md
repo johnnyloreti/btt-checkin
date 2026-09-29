@@ -284,6 +284,7 @@ Vars in `wrangler.toml`:
 - `CHECKIN_EARLY_MIN = "180"` and `CHECKIN_LATE_MIN = "180"` (§2 window, minutes)
 - `KIOSK_BACKDATE_DAYS = "3"` and `STAFF_BACKDATE_DAYS = "30"` (§3 backdating, whole days)
 - `TAB_ITEMS`, `TAB_PROGRAMS`, `TAB_MIN_CENTS`, `TAB_MAX_ROLL_DAYS`, `TAB_AUTO_HOUR` (§15.3 drink tab; empty `TAB_ITEMS` turns it off, empty `TAB_AUTO_HOUR` makes charging button-only)
+- `WAIVER_TAG`, `WAIVER_FIELD` (§15.1), and `PAYER_FIELD`, `WAIVER_PAYER_FIELD` (§15.1 kids, Phase 1b; either blank sends every reminder to the member's own contact)
 
 `.dev.vars.example` committed; `.dev.vars` gitignored. Parser must handle CRLF and BOM.
 
@@ -407,7 +408,13 @@ So, for any migration from here on:
 **Field rule, learned 2026-09-25.** The GHL side of this feature was never finished: the sub-account had no `checkin_last_at` field until 2026-09-25, so for weeks every nudge wrote to a field that did not exist. `notifyWaiverCheckin` reported it and the caller only `console.warn`ed, so nothing surfaced. Fixed the same day:
 - `src/fields.js` lists every custom field the Worker writes (`requiredFieldKeys`). **Any new field the Worker writes is added there.** The roster sync checks the list every run and goes `degraded` naming what is missing; `/health` shows `missingFields` and goes `ok: false` while any are missing.
 - A nudge that does not land is written to `sync_log` (`job = 'waiver'`), and `/health` reports `waiverFailures24h` and `waiverLastFailure`.
-- Kids: the field is written on the kid's contact, which often has no phone or email for the reminder to reach. §15.3 Phase 1b's `payer_contact_id` is the fix (send to the payer instead). Not built yet.
+- Kids: the field is written on the kid's contact, which often has no phone or email for the reminder to reach. §15.3 Phase 1b's `payer_contact_id` is the fix (send to the payer instead). **Built 2026-09-29, approved by Johnny the same day ("phase 1b, kids waivers"):**
+  - The roster sync reads `PAYER_FIELD` (`payer_contact_id`) from each contact's custom fields and stores it in `members.payer_contact_id` (migration `src/db/migrations/005_payer.sql`, guarded by `hasPayerColumn`). Links are only written when they were actually read; a field GHL lacks, an unreadable field list, or a contact list with no custom fields leaves the stored links untouched. A value that is not a contact id is flagged by name and not used.
+  - A member with a payer linked who checks in without a waiver: the Worker writes `WAIVER_PAYER_FIELD` (proposed key `waiver_reminder_for`, Johnny to create or rename) **on the payer's contact**, value `"<First> <Last>, checked in <Tue Sep 29>"`. The day in the value makes it change once a day per kid, which is what fires the GHL workflow, so a parent gets at most one reminder per kid per day. The kid's own contact is not written. The parent's own waiver tag plays no part.
+  - No payer linked, `WAIVER_PAYER_FIELD` blank, that field missing in GHL, or the payer write failing: the kid's own `WAIVER_FIELD` is written exactly as before. A fallback from a linked payer is logged as a waiver failure, because the parent did not get the reminder.
+  - `WAIVER_PAYER_FIELD` is in `requiredFieldKeys` when set, so `/health` names it until it exists in GHL. `/health` also carries `payerLinks` from the last sync: whether the field was read, how many members are linked, and which kids (first ten by name) have no payer. Kids without a payer are reported, never a degraded sync. The staff member screen shows "Reminders go to: Parent on file" or, for a kid, "No parent linked". The payer's contact id never leaves the Worker.
+  - Unverified: that `GET /contacts/` carries each contact's `customFields`. If it does not, `payerLinks.field` reads "unreadable: the contact list carries no custom fields" and every kid falls back as before.
+  - **Johnny's GHL side:** the contact field `waiver_reminder_for` (single line text), and a workflow "Check-In: Kid waiver reminder": trigger Contact Changed on that field, an If/Else "field is not empty" guard, then the SMS or email to the contact (the parent) naming `{{contact.waiver_reminder_for}}` and the waiver link. The btt-ops side must fill `payer_contact_id` on each kid.
 
 ### 15.2 Stripe tracking (approved 2026-09-23)
 
@@ -657,5 +664,5 @@ No refunds, no voids, no deletes, no other write. `test/write-scanner.test.js` e
 
 #### Later phases (do not build yet; build Phase 1 so these slot in)
 
-- **Phase 1b, kids billed to a parent.** The roster sync reads a contact custom field `payer_contact_id` on each kid (the btt-ops side creates and fills it). A kid with a payer sees the drink row; the PIN pad asks for the **parent's** PIN; the purchase is recorded with `buyer` = kid and `payer` = parent. A kid with no `payer_contact_id` never sees the drink row. The 14-year-old in the adult class becomes eligible here, billed to the parent. The waiver nudge (§15.1) should also go to the payer here.
+- **Phase 1b, kids billed to a parent.** The waiver half is built (2026-09-29, §15.1): the roster sync already reads and stores `payer_contact_id`. The billing half below is not built. The roster sync reads a contact custom field `payer_contact_id` on each kid (the btt-ops side creates and fills it). A kid with a payer sees the drink row; the PIN pad asks for the **parent's** PIN; the purchase is recorded with `buyer` = kid and `payer` = parent. A kid with no `payer_contact_id` never sees the drink row. The 14-year-old in the adult class becomes eligible here, billed to the parent. The waiver nudge (§15.1) should also go to the payer here.
 - **Phase 2, merchandise.** A "Shop" button on the kiosk home screen. Items come from a GHL product collection rather than `tab-items.json`, including variants (sizes) and stock. A parent who has already checked a kid in picks an item and size, enters their PIN, and it goes on the same tab. Keep item handling data-driven so Phase 2 swaps the source, not the flow.
