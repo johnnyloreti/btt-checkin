@@ -111,9 +111,9 @@ Not built: a GHL notification on a threshold. That needs a sixth custom field, w
 
 Built 2026-09-25, all seven steps of the build order in `CLAUDE.md` §15.3. The $0.50 test settled that afternoon (charged about ten hours after the invoice went out), so the close-out is built too.
 
-**What the close-out does.** On the Tab view, **Review and charge** lists every payer with open lines: their total, and either the card that will be charged (brand, last four, where it was saved), "Rolling (under $5)", "No card on file" or "Missing email or phone". The card check runs one payer at a time from the page. One button, "Charge N members, $X", asks for a confirm tap, then works through the payers one per request with live progress. Each payer gets one GHL invoice schedule with saved-card auto-pay; GHL texts and emails them its standard invoice message and charges the card sometime that day. Every step is written to D1 before the next runs, so a crash mid-way resumes without a second invoice. **Check** reads the invoice status; **Charged at POS** closes a payer by hand with no GHL call, for a failed charge or a member with no saved card. A payer with no card is flagged so the drink row hides for them until you clear it on their member screen.
+**What the close-out does.** On the Tab view, **Review and charge** lists every payer with open lines: their total, and either the card that will be charged (brand, last four, where it was saved), "Rolling (under $5)", "No card on file" or "Missing email or phone". The card check runs one payer at a time from the page. One button, "Charge N members, $X", asks for a confirm tap, then works through the payers one per request with live progress. Each payer gets one GHL invoice schedule with saved-card auto-pay; GHL charges the card sometime that day and emails the receipt. Every step is written to D1 before the next runs, so a crash mid-way resumes without a second invoice. **Check** reads the invoice status; **Charged at POS** closes a payer by hand with no GHL call, for a failed charge or a member with no saved card. A payer with no card is flagged so the drink row hides for them until you clear it on their member screen.
 
-**The first live close-out should be you alone**, with drinks worth $5 on your own tab, watched on the staff page. The response shapes from GHL were observed once, not documented, and the code reads them tolerantly; one real run through the review screen confirms them. If a row lands on "needs a look", read the note on it before pressing anything.
+**The first live close-out ran on 2026-09-27, you alone**, and confirmed the response shapes (after the three fixes recorded below). If a row lands on "needs a look", read the note on it before pressing anything.
 
 Timing to expect: the charge lands sometime the same day; the receipt email follows it. The row reads "Charging on <day>" until then, and "Paid" once it is seen. A row still unpaid the day after the charge day reads "Not paid, needs a look".
 
@@ -159,7 +159,6 @@ Known limit, not part of this work: the nightly rollup pushes every pending cont
 - Confirm the four class durations in `schedule.json`.
 - iPad: Add to Home Screen, Guided Access, auto-lock off.
 - Consider Workers Paid ($5/month) for the request and D1 caps.
-- Run the first live close-out on yourself alone and confirm the row goes Charging, then Paid.
 - Read the Cloudflare limits page once and paste the subrequest and CPU numbers for this plan into the §15.3 section above.
 
 ## Shipping a change from a session branch
