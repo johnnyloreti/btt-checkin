@@ -186,6 +186,14 @@ Kiosk drinks: Water $1, LMNT $3 (was "Hydration"; same GHL product), Gatorade $2
 
 Gatorade now has real GHL ids (created by the btt-ops session on 2026-09-30, product `6abc53e2d885033ef3478209`, price `6abc53e3c566ebca38ae323c`). Only a Gatorade bought while the made-up ids were live could still fail at the nightly charge. If a row on Review and charge shows a GHL error for someone with a Gatorade, use Charged at POS on it.
 
+## Kiosk, 2026-09-30
+
+- The success screen holds 5 seconds instead of 3. The waiver hold (12 s) and the holds while someone is buying are unchanged.
+- A member without a purchase PIN now sees the drinks, plus a gold "Put drinks on your tab" panel with a gold "Text me a setup link" button. Tapping a drink before setting up points them at the panel and sends nothing.
+- "Just a drink? Buy one here" on the home screen: search, tap your name, pick a drink, enter your PIN. No check-in is recorded. Kids and anyone who can't buy get "Drinks on the tab are for adult members. Ask at the desk." The button only shows while the drink tab is on.
+- New public routes: `GET /api/tab/available`, `POST /api/tab/status`. No new GHL call, no migration.
+- Reload the iPad after deploying (see above).
+
 ## Still open after go-live
 
 - Rotate `STAFF_PIN`; the first one was pasted into a chat.

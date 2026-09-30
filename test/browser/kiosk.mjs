@@ -40,7 +40,7 @@ const CURRENT = {
   ],
 };
 
-const state = { failCheckins: false, checkins: [], seen: new Set(), purchases: [], links: [], pins: { cccccccccccccccccccc: '1234' }, failPurchases: false, locked: new Set() };
+const state = { failCheckins: false, checkins: [], seen: new Set(), purchases: [], links: [], pins: { cccccccccccccccccccc: '1234' }, failPurchases: false, locked: new Set(), statusCalls: [], failStatus: false };
 const TAB_ITEMS = [{ key: 'water', label: 'Water', amountCents: 100, price: '$1' }, { key: 'hydration', label: 'LMNT', amountCents: 300, price: '$3' }, { key: 'gatorade', label: 'Gatorade', amountCents: 200, price: '$2' }];
 // Adults may buy (María has a PIN, Jake does not); kids never see the row.
 const ADULTS = new Set(['cccccccccccccccccccc', '33333333333333333333']);
@@ -66,6 +66,18 @@ const server = http.createServer((req, res) => {
       const out = { ok: true, duplicate, className: rec.className, classStartLocal: rec.classStartLocal, classCount: count, classCountLabel: `Class #${count}`, waiverNeeded: rec.contactId === 'ffffffffffffffffffff' };
       if (ADULTS.has(rec.contactId)) out.tab = { items: TAB_ITEMS, hasPin: Boolean(state.pins[rec.contactId]), locked: state.locked.has(rec.contactId) };
       send(200, out);
+    });
+    return;
+  }
+  if (url.pathname === '/api/tab/available') return send(200, { enabled: true });
+  if (url.pathname === '/api/tab/status' && req.method === 'POST') {
+    readBody(req).then((b) => {
+      state.statusCalls.push(b.contactId);
+      if (state.failStatus) return send(500, { error: 'boom' });
+      const m = ROSTER.find((r) => r.id === b.contactId);
+      if (!m) return send(404, { error: 'unknown member' });
+      if (!ADULTS.has(b.contactId)) return send(200, { tab: null, reason: 'not_eligible', first: m.first });
+      send(200, { tab: { items: TAB_ITEMS, hasPin: Boolean(state.pins[b.contactId]), locked: state.locked.has(b.contactId) }, first: m.first });
     });
     return;
   }
@@ -155,7 +167,7 @@ await step('success: shows class, time, and Class #1, then returns home', async 
   assert.equal(await page.locator('#success-count').textContent(), 'Class #1');
   assert.match(await page.locator('#success h2').textContent(), /You're checked in/);
   await page.screenshot({ path: join(OUT, 'ipad-success.png') });
-  await page.waitForSelector('#home.active', { timeout: 5000 });
+  await page.waitForSelector('#home.active', { timeout: 7000 });
   assert.equal(await page.inputValue('#name-input'), '');
   assert.equal(state.checkins.length, 1);
   assert.equal(state.checkins[0].className, 'Kids 6-9');
@@ -167,7 +179,7 @@ await step('duplicate: second tap still shows the success screen', async () => {
   await page.click('#checkin');
   await page.waitForSelector('#success.active');
   assert.equal(await page.locator('#success-count').textContent(), 'Class #1');
-  await page.waitForSelector('#home.active', { timeout: 5000 });
+  await page.waitForSelector('#home.active', { timeout: 7000 });
 });
 await step('two programs: Leo sees two large buttons', async () => {
   await page.fill('#name-input', 'leo');
@@ -181,7 +193,7 @@ await step('two programs: Leo sees two large buttons', async () => {
   await page.click('#confirm .btn[data-class="Kids 10-14"]');
   await page.waitForSelector('#success.active');
   assert.equal(await page.locator('#success-class').textContent(), 'Kids 10-14, 11:45 AM');
-  await page.waitForSelector('#home.active', { timeout: 5000 });
+  await page.waitForSelector('#home.active', { timeout: 7000 });
 });
 await step('no class: María (adult) gets "Check in anyway" and records open mat', async () => {
   await page.fill('#name-input', 'nun');
@@ -194,7 +206,7 @@ await step('no class: María (adult) gets "Check in anyway" and records open mat
   const last = state.checkins.at(-1);
   assert.equal(last.className, 'open mat / unscheduled');
   assert.equal(last.classStartLocal, '2026-09-05T00:00');
-  await page.waitForSelector('#home.active', { timeout: 5000 });
+  await page.waitForSelector('#home.active', { timeout: 7000 });
 });
 await step('waiver missing: success screen adds the prompt and holds longer', async () => {
   await page.fill('#name-input', 'jas');
@@ -213,7 +225,7 @@ await step('waiver missing: success screen adds the prompt and holds longer', as
   await page.click('#checkin');
   await page.waitForSelector('#success.active');
   assert.equal(await page.locator('#waiver').isVisible(), false);
-  await page.waitForSelector('#home.active', { timeout: 5000 });
+  await page.waitForSelector('#home.active', { timeout: 7000 });
 });
 
 await step('drink tab: an adult with a PIN sees the row, types the PIN, the drink lands on the tab', async () => {
@@ -248,7 +260,7 @@ await step('drink tab: an adult with a PIN sees the row, types the PIN, the drin
   assert.equal(state.purchases[0].pin, '1234');
   assert.equal(state.purchases[0].contactId, 'cccccccccccccccccccc');
   await page.screenshot({ path: join(OUT, 'ipad-drink-added.png') });
-  // The screen held past the normal 3 seconds, then goes home.
+  // The screen held past the normal 5 seconds, then goes home.
   await page.waitForSelector('#home.active', { timeout: 12000 });
 });
 await step('drink tab: a kid never sees the row', async () => {
@@ -257,20 +269,33 @@ await step('drink tab: a kid never sees the row', async () => {
   await page.click('#checkin');
   await page.waitForSelector('#success.active');
   assert.equal(await page.locator('#tab.active').count(), 0);
-  await page.waitForSelector('#home.active', { timeout: 5000 });
+  await page.waitForSelector('#home.active', { timeout: 7000 });
 });
-await step('drink tab: no PIN yet offers a setup link, once', async () => {
+await step('drink tab: no PIN yet shows the drinks and a gold setup panel; a drink tap points at it', async () => {
   await page.fill('#name-input', 'jake');
   await page.click('.tile:has-text("Jake Miller")');
   await page.waitForSelector('#checkin-anyway');
   await page.click('#checkin-anyway');
   await page.waitForSelector('#pin-link');
-  assert.equal(await page.locator('.drink').count(), 0);
-  assert.match(await page.locator('#tab-setup').textContent(), /Set up your purchase PIN/);
+  assert.equal(await page.locator('.drink.preview').count(), 3);
+  assert.equal(await page.locator('#tab-ask').textContent(), 'Thirsty?');
+  assert.match(await page.locator('#pin-panel .pin-head').textContent(), /Put drinks on your tab/);
+  assert.match(await page.locator('#pin-panel .pin-line').textContent(), /Set up a purchase PIN once/);
+  assert.equal(await page.locator('#pin-link').textContent(), 'Text me a setup link');
+  const gold = await page.evaluate(() => getComputedStyle(document.getElementById('pin-link')).backgroundColor);
+  assert.equal(gold, 'rgb(231, 194, 76)', 'setup button is the gold primary');
   await page.screenshot({ path: join(OUT, 'ipad-pin-setup.png') });
+  await page.click('.drink[data-item="water"]');
+  await page.waitForFunction(() => /Set up your PIN first/.test(document.getElementById('tab-msg').textContent));
+  assert.equal(await page.locator('#pad.active').count(), 0, 'no pad without a PIN');
+  assert.deepEqual(state.links, [], 'a drink tap sends no text');
+  // Held past the normal 5 seconds after that tap.
+  await page.waitForTimeout(6000);
+  assert.equal(await page.locator('#success.active').count(), 1);
   await page.click('#pin-link');
   await page.waitForFunction(() => /Check your texts for a link/.test(document.getElementById('tab-msg').textContent));
   assert.deepEqual(state.links, ['33333333333333333333']);
+  assert.equal(await page.locator('.drink').count(), 0);
   await page.waitForSelector('#home.active', { timeout: 12000 });
   // Straight away again: not resent, and it says so.
   await page.fill('#name-input', 'jake');
@@ -324,7 +349,7 @@ await step('drink tab: Cancel on the pad, and the locked state', async () => {
   assert.equal(await page.locator('.drink').count(), 0);
   assert.match(await page.locator('#tab-msg').textContent(), /Purchases are paused for this account/);
   state.locked.delete('cccccccccccccccccccc');
-  await page.waitForSelector('#home.active', { timeout: 5000 });
+  await page.waitForSelector('#home.active', { timeout: 7000 });
 });
 
 await step('success: "Back to check in" goes home at once, even on the long waiver hold, and the next person can start', async () => {
@@ -342,10 +367,105 @@ await step('success: "Back to check in" goes home at once, even on the long waiv
   // The skipped timer does not fire later and bounce the next person home.
   await page.fill('#name-input', 'jack');
   await page.click('.tile:has-text("Jack Silva")');
-  await page.waitForTimeout(3500);
+  await page.waitForTimeout(5500);
   assert.equal(await page.locator('#confirm.active').count(), 1, 'still on the next person\'s confirm screen');
   await page.click('#back');
   await page.waitForSelector('#home.active');
+});
+
+await step('success: holds 5 seconds, not 3', async () => {
+  await page.fill('#name-input', 'jack');
+  await page.click('.tile:has-text("Jack Silva")');
+  await page.click('#checkin');
+  await page.waitForSelector('#success.active');
+  await page.waitForTimeout(4000);
+  assert.equal(await page.locator('#success.active').count(), 1, 'still up at 4 s');
+  await page.waitForTimeout(2000);
+  assert.equal(await page.locator('#home.active').count(), 1, 'home by 6 s');
+});
+
+await step('drink only: the home button opens drink mode; a tile says hi, no check-in, and a PIN buys', async () => {
+  const checkinsBefore = state.checkins.length;
+  const purchasesBefore = state.purchases.length;
+  assert.equal(await page.locator('#drink-mode').isVisible(), true);
+  assert.equal(await page.locator('#drink-mode').textContent(), 'Just a drink? Buy one here');
+  assert.equal(await page.locator('#drink-exit').isVisible(), false);
+  await page.click('#drink-mode');
+  assert.equal(await page.locator('#home-title').textContent(), 'Buy a drink');
+  assert.equal(await page.locator('#drink-mode').isVisible(), false);
+  assert.equal(await page.locator('#drink-exit').isVisible(), true);
+  await page.screenshot({ path: join(OUT, 'ipad-drink-mode.png') });
+  await page.fill('#name-input', 'nun');
+  await page.click('.tile:has-text("María Núñez")');
+  await page.waitForSelector('#success.active.drink-only');
+  await page.waitForSelector('.drink[data-item="gatorade"]');
+  assert.equal(await page.locator('#drink-hello').textContent(), 'Hi María');
+  assert.equal(await page.locator('#success .check').isVisible(), false);
+  assert.equal(await page.locator('#success h2').isVisible(), false);
+  assert.equal(await page.locator('#success-class').isVisible(), false);
+  assert.equal(await page.locator('#tab-ask').textContent(), 'Thirsty?');
+  await page.screenshot({ path: join(OUT, 'ipad-drink-only.png') });
+  // Held well past the check-in screen's 5 seconds.
+  await page.waitForTimeout(6000);
+  assert.equal(await page.locator('#success.active').count(), 1);
+  await page.click('.drink[data-item="gatorade"]');
+  await page.waitForSelector('#pad.active');
+  for (const k of ['1', '2', '3', '4']) await page.click(`.key[data-key="${k}"]`);
+  await page.waitForFunction(() => /Added to your tab\. Gatorade, \$2\./.test(document.getElementById('tab-msg').textContent));
+  assert.equal(state.purchases.length, purchasesBefore + 1);
+  assert.equal(state.purchases.at(-1).item, 'gatorade');
+  assert.equal(state.checkins.length, checkinsBefore, 'no check-in posted');
+  await page.click('#success-home');
+  await page.waitForSelector('#home.active');
+  assert.equal(await page.locator('#home-title').textContent(), 'Check in', 'back to check-in mode');
+  // The next person tapping a tile gets the check-in confirm, not drink mode.
+  await page.fill('#name-input', 'jack');
+  await page.click('.tile:has-text("Jack Silva")');
+  await page.waitForSelector('#confirm.active');
+  await page.click('#back');
+  await page.waitForSelector('#home.active');
+});
+await step('drink only: a kid gets the adults line, a failure says so, and Back to check in leaves drink mode', async () => {
+  const checkinsBefore = state.checkins.length;
+  await page.click('#drink-mode');
+  await page.fill('#name-input', 'jack');
+  await page.click('.tile:has-text("Jack Silva")');
+  await page.waitForFunction(() => /Drinks on the tab are for adult members\. Ask at the desk\./.test(document.getElementById('tab-msg').textContent));
+  assert.equal(await page.locator('.drink').count(), 0);
+  assert.equal(await page.locator('#drink-hello').textContent(), 'Hi Jack');
+  await page.click('#success-home');
+  await page.waitForSelector('#home.active');
+
+  state.failStatus = true;
+  await page.click('#drink-mode');
+  await page.fill('#name-input', 'nun');
+  await page.click('.tile:has-text("María Núñez")');
+  await page.waitForFunction(() => /That didn't go through\. Ask at the desk\./.test(document.getElementById('tab-msg').textContent));
+  assert.equal(await page.locator('.drink').count(), 0);
+  state.failStatus = false;
+  await page.click('#success-home');
+  await page.waitForSelector('#home.active');
+  assert.equal(state.checkins.length, checkinsBefore, 'no check-in posted');
+  const queued = await page.evaluate(() => JSON.parse(localStorage.getItem('btt.checkin.queue') || '[]'));
+  assert.equal(queued.length, 0, 'nothing queued');
+
+  await page.click('#drink-mode');
+  await page.fill('#name-input', 'ja');
+  await page.waitForSelector('.tile');
+  await page.click('#drink-exit');
+  assert.equal(await page.locator('#home-title').textContent(), 'Check in');
+  assert.equal(await page.locator('.tile').count(), 0);
+  assert.equal(await page.inputValue('#name-input'), '');
+  assert.equal(await page.locator('#drink-mode').isVisible(), true);
+  // A check-in after drink mode shows the normal success screen.
+  await page.fill('#name-input', 'jack');
+  await page.click('.tile:has-text("Jack Silva")');
+  await page.click('#checkin');
+  await page.waitForSelector('#success.active');
+  assert.equal(await page.locator('#success.drink-only').count(), 0);
+  assert.equal(await page.locator('#success h2').isVisible(), true);
+  assert.equal(await page.locator('#drink-hello').isVisible(), false);
+  await page.waitForSelector('#home.active', { timeout: 7000 });
 });
 
 await step('back button returns home', async () => {
@@ -367,7 +487,7 @@ await step('offline: failed POST still shows success and queues with its origina
   assert.equal(queued.length, 1);
   assert.equal(state.checkins.length, before);
   assert.match(await page.locator('#status').textContent(), /1 check-in waiting to sync/);
-  await page.waitForSelector('#home.active', { timeout: 5000 });
+  await page.waitForSelector('#home.active', { timeout: 7000 });
   state.failCheckins = false;
   const ts = queued[0].clientTs;
   await page.evaluate(() => window.dispatchEvent(new Event('online')));

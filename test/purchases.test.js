@@ -272,3 +272,47 @@ test('member lookup carries the tab: open lines, history, PIN state, eligibility
   const plain = await (await off.staff(`/api/staff/member?id=${await off.id('c_dan')}`)).json();
   assert.deepEqual(plain.tab, { enabled: false });
 });
+
+// ---- a drink without checking in (Johnny, 2026-09-30) ----
+
+test('/api/tab/status gives the same drink row as a check-in, and records nothing', async () => {
+  const { env, call, id } = await setup();
+  const status = async (c) => call('/api/tab/status', { method: 'POST', body: { contactId: await id(c) } });
+
+  const dan = await (await status('c_dan')).json();
+  assert.equal(dan.first, 'Dan');
+  assert.deepEqual(dan.tab, { items: [{ key: 'water', label: 'Water', amountCents: 100, price: '$1' }, { key: 'hydration', label: 'LMNT', amountCents: 300, price: '$3' }], hasPin: false, locked: false });
+  await givePin(env, 'c_dan');
+  assert.equal((await (await status('c_dan')).json()).tab.hasPin, true);
+
+  for (const kid of ['c_jack', 'c_leo']) {
+    const r = await (await status(kid)).json();
+    assert.equal(r.tab, null, kid);
+    assert.equal(r.reason, 'not_eligible', kid);
+  }
+  env.DB.raw.prepare("INSERT INTO tab_flags VALUES ('c_dan', '2026-09-20T00:00:00Z')").run();
+  assert.equal((await (await status('c_dan')).json()).reason, 'not_eligible', 'no card on file hides it too');
+
+  assert.equal((await call('/api/tab/status', { method: 'POST', body: { contactId: '0'.repeat(20) } })).status, 404);
+  assert.equal((await call('/api/tab/status', { method: 'POST', body: undefined })).status, 400);
+
+  assert.equal(env.DB.raw.prepare('SELECT COUNT(*) AS n FROM attendance').get().n, 0, 'no check-in recorded');
+  assert.equal(env.DB.raw.prepare('SELECT COUNT(*) AS n FROM pending_rollups').get().n, 0, 'nothing queued for GHL');
+
+  // A purchase needs no check-in first.
+  env.DB.raw.prepare('DELETE FROM tab_flags').run();
+  const bought = await (await call('/api/tab/purchase', { method: 'POST', body: { contactId: await id('c_dan'), item: 'water', pin: '1234' } })).json();
+  assert.equal(bought.ok, true);
+  assert.equal(env.DB.raw.prepare('SELECT COUNT(*) AS n FROM attendance').get().n, 0);
+});
+
+test('/api/tab/available says whether to offer drinks on the home screen; status answers "off" when it is not', async () => {
+  const on = await setup();
+  assert.deepEqual(await (await on.call('/api/tab/available', { method: 'GET' })).json(), { enabled: true });
+  for (const opts of [{ tabOn: false }, { noTab: true }]) {
+    const { call, id } = await setup(opts);
+    assert.deepEqual(await (await call('/api/tab/available', { method: 'GET' })).json(), { enabled: false }, JSON.stringify(opts));
+    const r = await (await call('/api/tab/status', { method: 'POST', body: { contactId: await id('c_dan') } })).json();
+    assert.deepEqual(r, { tab: null, reason: 'off' }, JSON.stringify(opts));
+  }
+});

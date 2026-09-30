@@ -28,7 +28,7 @@ import { localParts, localDayBounds } from './time.js';
 
 /** Static files the Worker will hand to the assets binding. Everything else is 404. */
 const PUBLIC_ASSETS = new Set(['/', '/index.html', '/search.js', '/logo.png', '/waiver-qr.png', '/favicon.ico', '/pin', '/pin.html']);
-const PUBLIC_API = new Set(['/api/roster', '/api/current-class', '/api/checkin', '/api/tab/pin-link', '/api/tab/pin-token', '/api/tab/pin-set', '/api/tab/purchase']);
+const PUBLIC_API = new Set(['/api/roster', '/api/current-class', '/api/checkin', '/api/tab/pin-link', '/api/tab/pin-token', '/api/tab/pin-set', '/api/tab/purchase', '/api/tab/status', '/api/tab/available']);
 
 export function json(body, status = 200, headers = {}) {
   return new Response(JSON.stringify(body), {
@@ -275,6 +275,17 @@ export function createApp(schedule, deps = defaultDeps(), opts = {}) {
   async function buyer(env, cfg, member) {
     return canBuy(memberPrograms(member), cfg, { noCard: await hasNoCardFlag(env, member.ghl_contact_id) });
   }
+  // The drink row for one member, or null when they cannot buy. Shared by
+  // the check-in response and the drink-only lookup, so both show the same.
+  async function tabBlock(env, cfg, member, at) {
+    if (!cfg || !(await buyer(env, cfg, member))) return null;
+    const pin = await pinStatus(env, member.ghl_contact_id, at);
+    return {
+      items: cfg.items.map((i) => ({ key: i.key, label: i.label, amountCents: i.amountCents, price: formatCents(i.amountCents) })),
+      hasPin: pin.hasPin,
+      locked: pin.locked,
+    };
+  }
   function setupLink(cfg, url, token) {
     return `${cfg.publicOrigin || url.origin}/pin?t=${token}`;
   }
@@ -302,15 +313,8 @@ export function createApp(schedule, deps = defaultDeps(), opts = {}) {
     // §15.3: the drink row, only for a member who may buy, only on a check-in
     // that reached the server. A queued check-in never shows it.
     if (method === 'kiosk') {
-      const cfg = await tabReady(env);
-      if (cfg && (await buyer(env, cfg, member))) {
-        const pin = await pinStatus(env, member.ghl_contact_id, at);
-        body2.tab = {
-          items: cfg.items.map((i) => ({ key: i.key, label: i.label, amountCents: i.amountCents, price: formatCents(i.amountCents) })),
-          hasPin: pin.hasPin,
-          locked: pin.locked,
-        };
-      }
+      const block = await tabBlock(env, await tabReady(env), member, at);
+      if (block) body2.tab = block;
     }
     if (waiverNeeded && !result.body.duplicate && deps.notifyWaiver) {
       // A kid's reminder goes to the payer when one is linked (Phase 1b).
@@ -390,6 +394,23 @@ export function createApp(schedule, deps = defaultDeps(), opts = {}) {
         }
 
         // ---- drink tab, public (§15.3) ----
+        // Whether the home screen offers "buy a drink" at all.
+        if (method === 'GET' && path === '/api/tab/available') {
+          return json({ enabled: Boolean(await tabReady(env)) });
+        }
+        // A drink without checking in (Johnny, 2026-09-30): the same drink
+        // row the check-in response carries, for one member. Reads only; it
+        // records no attendance.
+        if (method === 'POST' && path === '/api/tab/status') {
+          const body = await readJson(request);
+          if (!body) return json({ error: 'expected JSON body' }, 400);
+          const member = await resolveMember(env, body.contactId);
+          if (!member) return json({ error: 'unknown member' }, 404);
+          const cfg = await tabReady(env);
+          if (!cfg) return json({ tab: null, reason: 'off' });
+          const block = await tabBlock(env, cfg, member, now());
+          return json(block ? { tab: block, first: member.first_name || '' } : { tab: null, reason: 'not_eligible', first: member.first_name || '' });
+        }
         if (path.startsWith('/api/tab/')) {
           const cfg = await tabReady(env);
           if (!cfg) return json({ error: 'not found' }, 404);

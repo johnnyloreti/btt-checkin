@@ -68,6 +68,19 @@
   .tab-msg { font-size: 22px; margin-top: 16px; min-height: 28px; }
   .setup p { font-size: 22px; margin: 0 0 12px; }
   .setup .btn.secondary { font-size: 24px; padding: 18px; }
+  /* No PIN yet: the drinks show as a preview and a gold panel asks for the PIN (Johnny, 2026-09-30). */
+  .drink.preview { opacity: 0.7; }
+  .pin-panel { margin-top: 18px; padding: 20px 22px; border: 2px solid var(--gold); border-radius: 18px; background: rgba(231, 194, 76, 0.1); }
+  .success .pin-panel .pin-head { font-family: var(--display); font-weight: 500; font-size: 30px; color: var(--gold); margin: 0 0 6px; }
+  .success .pin-panel .pin-line { font-size: 20px; margin: 0 0 16px; }
+  .pin-panel .btn { font-size: 26px; padding: 20px; margin-top: 0; }
+  .pin-panel.pulse { animation: pin-pulse 0.5s ease-in-out 3; }
+  @keyframes pin-pulse { 50% { box-shadow: 0 0 0 8px rgba(231, 194, 76, 0.35); } }
+  /* A drink without checking in: the success screen minus the check-in parts. */
+  .hello { display: none; font-family: var(--display); font-weight: 500; font-size: 52px; margin: 10px 0 4px; }
+  .success.drink-only .hello { display: block; }
+  .success.drink-only .check, .success.drink-only h2, .success.drink-only #success-class, .success.drink-only #success-count, .success.drink-only .waiver { display: none; }
+  .drink-entry { font-size: 22px; padding: 16px; margin-top: 22px; max-width: 520px; }
   /* Skips the rest of the success timer when there is a line. The timer itself is unchanged. */
   .success .done { font-size: 24px; padding: 18px; margin: 28px auto 0; max-width: 520px; display: block; }
   .pad { position: fixed; inset: 0; background: rgba(9, 9, 10, 0.96); display: none; flex-direction: column; align-items: center; justify-content: center; z-index: 5; padding: 24px; }
@@ -98,10 +111,12 @@
 <section id="home" class="screen active">
   <img class="logo" src="/logo.png" alt="" onerror="this.style.display='none'">
   <p class="brand">Brazilian Top Team Bridgewater</p>
-  <h1>Check in</h1>
+  <h1 id="home-title">Check in</h1>
   <input id="name-input" class="input" type="text" placeholder="Type your name" autocomplete="off" autocorrect="off" autocapitalize="words" spellcheck="false" enterkeyhint="search" aria-label="Type your name">
   <div id="tiles" class="tiles" role="list"></div>
   <p id="hint" class="hint"></p>
+  <button id="drink-mode" class="btn secondary drink-entry" type="button" hidden>Just a drink? Buy one here</button>
+  <button id="drink-exit" class="back" type="button" hidden>Back to check in</button>
 </section>
 
 <section id="confirm" class="screen">
@@ -115,6 +130,7 @@
 <section id="success" class="screen success">
   <div class="check">&#10003;</div>
   <h2>You're checked in</h2>
+  <div id="drink-hello" class="hello"></div>
   <p id="success-class"></p>
   <p id="success-count" class="count"></p>
   <div id="waiver" class="waiver">
@@ -145,7 +161,8 @@
   import { search, formatTime, displayName } from '/search.js';
 
   const IDLE_MS = 60_000;
-  const SUCCESS_MS = 3_000;
+  const SUCCESS_MS = 5_000;        // 3 s until 2026-09-30; Johnny: time to reach the drinks
+  const DRINK_ONLY_MS = 30_000;    // a drink without checking in: they came to buy
   const SUCCESS_WAIVER_MS = 12_000;
   const SUCCESS_TAB_MS = 45_000;   // holding the screen while a PIN is typed
   const SUCCESS_AFTER_TAB_MS = 7_000;
@@ -167,6 +184,8 @@
   let selected = null;
   let idleTimer = null;
   let successTimer = null;
+  let drinkMode = false;     // home screen is in "buy a drink" mode
+  let tabAvailable = false;  // the server says the drink tab is on
 
   // ---------- storage helpers (never throw) ----------
   function load(key, fallback) {
@@ -186,10 +205,27 @@
     closePad();
     successMember = null;
     selected = null;
+    setDrinkMode(false);
+    show('home');
+  }
+  // Check in, or just buy a drink. Same search either way.
+  function setDrinkMode(on) {
+    drinkMode = on;
+    $('home-title').textContent = on ? 'Buy a drink' : 'Check in';
+    $('drink-mode').hidden = on || !tabAvailable;
+    $('drink-exit').hidden = !on;
     input.value = '';
     tiles.innerHTML = '';
     hint.textContent = '';
-    show('home');
+  }
+  async function refreshTabAvailable() {
+    try {
+      const res = await fetch('/api/tab/available', { cache: 'no-store' });
+      tabAvailable = res.ok && (await res.json()).enabled === true;
+    } catch {
+      /* keep the last answer */
+    }
+    $('drink-mode').hidden = drinkMode || !tabAvailable;
   }
   function bumpIdle() {
     clearTimeout(idleTimer);
@@ -264,7 +300,7 @@
       program.className = 'program';
       program.textContent = m.program || '';
       b.append(name, program);
-      b.addEventListener('click', () => pick(m));
+      b.addEventListener('click', () => (drinkMode ? pickDrink(m) : pick(m)));
       tiles.appendChild(b);
     }
   }
@@ -336,6 +372,8 @@
   }
   $('back').addEventListener('click', goHome);
   $('success-home').addEventListener('click', goHome);
+  $('drink-mode').addEventListener('click', () => { setDrinkMode(true); input.focus(); });
+  $('drink-exit').addEventListener('click', () => { setDrinkMode(false); input.focus(); });
 
   // ---------- submit ----------
   let submitting = false;
@@ -375,6 +413,7 @@
     const waiver = Boolean(result && result.waiverNeeded);
     $('waiver').classList.toggle('active', waiver);
     successMember = member || null;
+    screens.success.classList.remove('drink-only');
     renderTab(result && result.tab ? result.tab : null);
     show('success');
     holdSuccess(waiver ? SUCCESS_WAIVER_MS : SUCCESS_MS);
@@ -400,15 +439,17 @@
     $('tab-msg').textContent = '';
     box.classList.toggle('active', Boolean(tab));
     if (!tab) return;
-    const showing = tab.hasPin && !tab.locked;
+    const showing = !tab.locked;
     $('tab-ask').style.display = showing ? '' : 'none';
     $('tab-note').style.display = showing ? '' : 'none';
     if (tab.locked) { $('tab-msg').textContent = LOCKED_COPY; return; }
-    if (!tab.hasPin) { renderSetup(); return; }
+    // Without a PIN the drinks still show, so the member sees what is on
+    // offer; tapping one points at the setup panel instead of the pad.
+    if (!tab.hasPin) renderSetup();
     for (const it of tab.items) {
       const b = document.createElement('button');
       b.type = 'button';
-      b.className = 'drink';
+      b.className = tab.hasPin ? 'drink' : 'drink preview';
       b.dataset.item = it.key;
       const n = document.createElement('div');
       n.className = 'n';
@@ -417,22 +458,41 @@
       p.className = 'p';
       p.textContent = it.price;
       b.append(n, p);
-      b.addEventListener('click', () => openPad(it));
+      b.addEventListener('click', () => (tab.hasPin ? openPad(it) : nudgeSetup()));
       $('drinks').appendChild(b);
     }
   }
   function renderSetup() {
     const box = $('tab-setup');
     box.innerHTML = '';
+    const panel = document.createElement('div');
+    panel.className = 'pin-panel';
+    panel.id = 'pin-panel';
+    const head = document.createElement('p');
+    head.className = 'pin-head';
+    head.textContent = 'Put drinks on your tab';
     const line = document.createElement('p');
-    line.textContent = 'Set up your purchase PIN';
+    line.className = 'pin-line';
+    line.textContent = "Set up a purchase PIN once. We'll text you a link.";
     const b = document.createElement('button');
     b.type = 'button';
-    b.className = 'btn secondary';
+    b.className = 'btn';
     b.id = 'pin-link';
     b.textContent = 'Text me a setup link';
     b.addEventListener('click', () => requestLink(b));
-    box.append(line, b);
+    panel.append(head, line, b);
+    box.appendChild(panel);
+  }
+  // A drink tapped before there is a PIN: point at the setup panel.
+  function nudgeSetup() {
+    const panel = $('pin-panel');
+    $('tab-msg').textContent = 'Set up your PIN first';
+    if (panel) {
+      panel.classList.remove('pulse');
+      void panel.offsetWidth; // restart the animation
+      panel.classList.add('pulse');
+    }
+    holdSuccess(SUCCESS_TAB_MS);
   }
   async function requestLink(button) {
     if (!successMember) return;
@@ -446,8 +506,40 @@
       /* the message above */
     }
     $('tab-setup').innerHTML = '';
+    $('drinks').innerHTML = '';
+    $('tab-ask').style.display = 'none';
+    $('tab-note').style.display = 'none';
     $('tab-msg').textContent = msg;
     holdSuccess(SUCCESS_AFTER_TAB_MS);
+  }
+
+  // A drink without checking in. Reads the same drink row the check-in
+  // response carries; records no attendance, and is never queued.
+  async function pickDrink(member) {
+    successMember = member;
+    screens.success.classList.add('drink-only');
+    $('drink-hello').textContent = `Hi ${member.first || displayName(member)}`;
+    $('waiver').classList.remove('active');
+    renderTab(null);
+    $('tab').classList.add('active');
+    $('tab-ask').style.display = 'none';
+    $('tab-note').style.display = 'none';
+    $('tab-msg').textContent = 'One moment';
+    show('success');
+    holdSuccess(DRINK_ONLY_MS);
+    let res = null;
+    try {
+      res = await fetchJson('/api/tab/status', { contactId: member.id });
+    } catch {
+      res = null;
+    }
+    if (successMember !== member) return; // gone home meanwhile
+    if (res && res.ok && res.body.tab) {
+      renderTab(res.body.tab);
+      $('tab').classList.add('active');
+      return;
+    }
+    $('tab-msg').textContent = res && res.ok ? 'Drinks on the tab are for adult members. Ask at the desk.' : "That didn't go through. Ask at the desk.";
   }
   async function fetchJson(path, body) {
     const ctl = new AbortController();
@@ -565,10 +657,12 @@
   // ---------- boot ----------
   roster = load(ROSTER_KEY, []);
   loadRoster();
+  refreshTabAvailable();
   refreshCurrentClass();
   updateStatus();
   drainQueue();
   setInterval(loadRoster, ROSTER_REFRESH_MS);
+  setInterval(refreshTabAvailable, ROSTER_REFRESH_MS);
   setInterval(refreshCurrentClass, CLASS_REFRESH_MS);
   setInterval(drainQueue, RETRY_MS);
   window.addEventListener('online', drainQueue);
