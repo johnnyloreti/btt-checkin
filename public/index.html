@@ -68,6 +68,8 @@
   .tab-msg { font-size: 22px; margin-top: 16px; min-height: 28px; }
   .setup p { font-size: 22px; margin: 0 0 12px; }
   .setup .btn.secondary { font-size: 24px; padding: 18px; }
+  /* Skips the rest of the success timer when there is a line. The timer itself is unchanged. */
+  .success .done { font-size: 24px; padding: 18px; margin: 28px auto 0; max-width: 520px; display: block; }
   .pad { position: fixed; inset: 0; background: rgba(9, 9, 10, 0.96); display: none; flex-direction: column; align-items: center; justify-content: center; z-index: 5; padding: 24px; }
   .pad.active { display: flex; }
   .pad h3 { font-family: var(--display); font-weight: 500; font-size: 34px; margin: 0 0 6px; }
@@ -126,6 +128,7 @@
     <div id="tab-setup" class="setup"></div>
     <p id="tab-msg" class="tab-msg"></p>
   </div>
+  <button id="success-home" class="btn secondary done" type="button">Back to check in</button>
 </section>
 
 <div id="pad" class="pad">
@@ -332,6 +335,7 @@
     }
   }
   $('back').addEventListener('click', goHome);
+  $('success-home').addEventListener('click', goHome);
 
   // ---------- submit ----------
   let submitting = false;

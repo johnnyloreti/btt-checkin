@@ -327,6 +327,27 @@ await step('drink tab: Cancel on the pad, and the locked state', async () => {
   await page.waitForSelector('#home.active', { timeout: 5000 });
 });
 
+await step('success: "Back to check in" goes home at once, even on the long waiver hold, and the next person can start', async () => {
+  await page.fill('#name-input', 'jas');
+  await page.click('.tile:has-text("Jasmine Kim")');
+  await page.click('#checkin');
+  await page.waitForSelector('#success.active');
+  assert.equal(await page.locator('#success-home').textContent(), 'Back to check in');
+  const t0 = Date.now();
+  await page.click('#success-home');
+  await page.waitForSelector('#home.active', { timeout: 1000 });
+  assert.ok(Date.now() - t0 < 1000, 'no wait for the timer');
+  assert.equal(await page.inputValue('#name-input'), '');
+  assert.equal(await page.locator('.tile').count(), 0);
+  // The skipped timer does not fire later and bounce the next person home.
+  await page.fill('#name-input', 'jack');
+  await page.click('.tile:has-text("Jack Silva")');
+  await page.waitForTimeout(3500);
+  assert.equal(await page.locator('#confirm.active').count(), 1, 'still on the next person\'s confirm screen');
+  await page.click('#back');
+  await page.waitForSelector('#home.active');
+});
+
 await step('back button returns home', async () => {
   await page.fill('#name-input', 'jam');
   await page.click('.tile:has-text("Jamie Baker")');
