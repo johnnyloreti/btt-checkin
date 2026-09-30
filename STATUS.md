@@ -184,7 +184,7 @@ Learned 2026-09-29. The kiosk page never reloads its own code; it only re-fetche
 
 Kiosk drinks: Water $1, LMNT $3 (was "Hydration"; same GHL product), Gatorade $2. The drink buttons now wrap two per row.
 
-**Gatorade's GHL ids are made up**, as you asked. Every tab charge sends each line's product and price ids to GHL, and GHL will most likely reject an invoice carrying ids it does not know. So the first nightly charge for someone with a Gatorade on their tab will probably fail: their row shows the error on Review and charge, and until that row is settled the next night's close-out does not start for anyone. To settle it: Charged at POS on that row. To prevent it: create a "Gatorade" product at $2 in GHL (Payments, Products), send me its product id and price id, and redeploy. Gatorade lines bought before the swap keep the made-up ids, so settle those with Charged at POS.
+Gatorade now has real GHL ids (created by the btt-ops session on 2026-09-30, product `6abc53e2d885033ef3478209`, price `6abc53e3c566ebca38ae323c`). Only a Gatorade bought while the made-up ids were live could still fail at the nightly charge. If a row on Review and charge shows a GHL error for someone with a Gatorade, use Charged at POS on it.
 
 ## Still open after go-live
 
