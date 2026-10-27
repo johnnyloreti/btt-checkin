@@ -179,12 +179,28 @@ await step('sync now posts and reports', async () => {
   assert.match(await page.locator('#toast').textContent(), /Synced 7 members/);
 });
 await step('stripes: eligible kid listed, recorded on a two-tap confirm, then cleared', async () => {
-  // Seven attended classes for Jack, on distinct past dates.
+  // Six attended classes for Jack, on distinct past dates: one away.
   const ins = env.DB.raw.prepare("INSERT INTO attendance (ghl_contact_id, class_name, class_start_local, checked_in_at, method) VALUES ('c_jack', 'Kids 6-9', ?, ?, 'kiosk')");
-  for (let i = 1; i <= 7; i += 1) ins.run(`2026-08-0${i}T16:30`, `2026-08-0${i}T20:30:00Z`);
+  for (let i = 1; i <= 6; i += 1) ins.run(`2026-08-0${i}T16:30`, `2026-08-0${i}T20:30:00Z`);
 
   await page.click('.tab[data-tab="stripes"]');
+  await page.waitForSelector('#stripes-next .row');
+  assert.match(await page.locator('#stripes-list').textContent(), /Nobody is eligible/);
+  assert.equal(await page.locator('#stripes-next-box').isVisible(), true);
+  const next = await page.locator('#stripes-next .row').allTextContents();
+  assert.equal(next.length, 1);
+  assert.match(next[0], /Jack Silva/);
+  assert.match(next[0], /6 since their first class/);
+  assert.match(next[0], /Next class makes 7/);
+  assert.equal(await page.locator('#stripes-next button').count(), 0, 'no record button one class away');
+  await page.screenshot({ path: join(OUT, 'staff-stripes-next.png') });
+
+  // The seventh check-in moves him up.
+  ins.run('2026-08-08T16:30', '2026-08-08T20:30:00Z');
+  await page.click('.tab[data-tab="tonight"]');
+  await page.click('.tab[data-tab="stripes"]');
   await page.waitForSelector('#stripes-list .row');
+  assert.equal(await page.locator('#stripes-next-box').isVisible(), false);
   const rows = await page.locator('#stripes-list .row').allTextContents();
   assert.equal(rows.length, 1, `expected one eligible, got ${rows.length}`);
   assert.match(rows[0], /Jack Silva/);

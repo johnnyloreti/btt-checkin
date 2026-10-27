@@ -427,6 +427,8 @@ Staff need to know who is due to be looked at for a stripe. Johnny: "start with 
 
 **Eligibility.** For a member whose programs include one of `STRIPE_PROGRAMS`, count attended classes since their last recorded promotion (all attended classes if none). Eligible when that reaches `STRIPE_CLASSES`. A member 22 classes past their last stripe is worth three, so the row shows the count, not a yes/no.
 
+**One class away (Johnny, 2026-10-27).** Under the eligible list, a second list shows members exactly one class short (`STRIPE_CLASSES - 1` since their last stripe), so staff checking in the morning know who would cross at tonight's class and can have the stripe ready. Heads-up only: these rows have no record button. Their next check-in moves them to the eligible list. Same programs, same count, same framing.
+
 **Recording.** A button on the row writes a `promotions` row holding who, kind, the ET date, and their lifetime count at that moment. That clears them from the list and starts the next interval. The member screen shows promotion history, with an undo on the most recent for a mis-tap.
 
 **Config in `wrangler.toml`:**

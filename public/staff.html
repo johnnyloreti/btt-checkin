@@ -110,6 +110,11 @@
     <h2>Stripes <span class="sub" id="stripes-rule"></span></h2>
     <p class="note" id="stripes-note">Eligible for review. Class count is one input, the call is yours.</p>
     <div id="stripes-list" class="list"></div>
+    <div id="stripes-next-box" hidden>
+      <h2 style="font-size:22px;margin-top:28px">One class away</h2>
+      <p class="note">Their next class makes it. Heads-up only; they move up once they check in.</p>
+      <div id="stripes-next" class="list"></div>
+    </div>
   </section>
 
   <section id="tabview" class="view">
@@ -382,6 +387,7 @@
       return;
     }
     $('stripes-rule').textContent = data.threshold ? `every ${data.threshold} classes` : '';
+    renderStripesNext(data);
     if (!data.enabled) {
       $('stripes-note').textContent = '';
       list.appendChild(el('div', 'empty', data.pendingMigration ? 'Stripe tracking needs its database migration.' : 'Stripe tracking is off.'));
@@ -418,6 +424,25 @@
         }
       });
       row.appendChild(award);
+      list.appendChild(row);
+    }
+  }
+
+  // Kids one class short. No record button: the list is for being ready.
+  function renderStripesNext(data) {
+    const box = $('stripes-next-box');
+    const list = $('stripes-next');
+    list.innerHTML = '';
+    const rows = data.enabled && Array.isArray(data.upNext) ? data.upNext : [];
+    box.hidden = rows.length === 0;
+    for (const r of rows) {
+      const row = el('div', 'row');
+      row.dataset.id = r.id;
+      row.append(
+        el('span', 'name', `${r.first} ${r.last}`.trim()),
+        el('span', 'since', `${r.since} since ${r.lastAwardedOn ? 'last stripe' : 'their first class'}`),
+        el('span', 'tag warn', `Next class makes ${r.since + 1}`),
+      );
       list.appendChild(row);
     }
   }

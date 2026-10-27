@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp } from '../src/app.js';
 import { syncRoster } from '../src/roster.js';
-import { stripeConfig, eligibleForStripe, stripesEnabled, DEFAULT_STRIPE_CLASSES } from '../src/promotions.js';
+import { stripeConfig, eligibleForStripe, upNextForStripe, stripesEnabled, DEFAULT_STRIPE_CLASSES } from '../src/promotions.js';
 import { loadSchedule } from '../src/schedule.js';
 import { opaqueId } from '../src/ids.js';
 import { resetFallback } from '../src/ratelimit.js';
@@ -92,6 +92,28 @@ test('no covered programs means nobody is listed', () => {
   assert.deepEqual(eligibleForStripe(members, new Map(), { threshold: 7, programs: [] }), []);
 });
 
+test('one class away: exactly one short, counted from the last award, never the eligible ones', () => {
+  const cfg = { threshold: 7, programs: ['kids-6-9', 'kids-3-5'] };
+  const members = [
+    { ghl_contact_id: 'six', first_name: 'Six', last_name: 'Classes', programs: ['kids-6-9'], lifetime: 6 },
+    { ghl_contact_id: 'five', first_name: 'Five', last_name: 'Classes', programs: ['kids-6-9'], lifetime: 5 },
+    { ghl_contact_id: 'seven', first_name: 'Seven', last_name: 'Classes', programs: ['kids-6-9'], lifetime: 7 },
+    { ghl_contact_id: 'again', first_name: 'Again', last_name: 'Soon', programs: ['kids-3-5'], lifetime: 19 },
+    { ghl_contact_id: 'past', first_name: 'Well', last_name: 'Past', programs: ['kids-3-5'], lifetime: 13 },
+    { ghl_contact_id: 'adult', first_name: 'An', last_name: 'Adult', programs: ['adult'], lifetime: 6 },
+  ];
+  const last = new Map([['again', { at_class_count: 13, awarded_on: '2026-09-01', kind: 'stripe' }]]);
+  const rows = upNextForStripe(members, last, cfg);
+  assert.deepEqual(rows.map((r) => [r.ghl_contact_id, r.since]), [['again', 6], ['six', 6]], 'sorted by name');
+  assert.equal(rows[0].lastAwardedOn, '2026-09-01');
+  assert.equal(rows[1].lastAwardedOn, null);
+  // 13 since and no award is eligible (worth 1), not "one away" from the next.
+  assert.ok(!rows.some((r) => r.ghl_contact_id === 'past'));
+  assert.deepEqual(eligibleForStripe(members, last, cfg).map((r) => r.ghl_contact_id), ['past', 'seven']);
+  assert.deepEqual(upNextForStripe(members, last, { threshold: 1, programs: ['kids-6-9'] }), [], 'a threshold of 1 has no one-away');
+  assert.deepEqual(upNextForStripe(members, last, { threshold: 7, programs: [] }), [], 'feature off');
+});
+
 // ---------- routes ----------
 
 test('the stripe routes are behind the PIN', async () => {
@@ -114,7 +136,22 @@ test('the list shows eligible kids only, with opaque ids and no raw contact ids'
   assert.deepEqual(body.rows.map((r) => `${r.first} ${r.last}`), ['Jack Silva']);
   assert.equal(body.rows[0].since, 7);
   assert.match(body.rows[0].id, /^[0-9a-f]{20}$/);
+  assert.deepEqual(body.upNext.map((r) => [`${r.first} ${r.last}`, r.since]), [['Emma Jones', 6]], 'one short is listed separately');
+  assert.match(body.upNext[0].id, /^[0-9a-f]{20}$/);
+  assert.equal(body.upNext[0].worth, undefined);
   assert.doesNotMatch(JSON.stringify(body), /c_[a-z]+/, 'no raw GHL contact ids');
+});
+
+test('a kid one class away moves to the eligible list with their next check-in', async () => {
+  const { call, give } = await setup();
+  give('c_jack', 6);
+  let body = await (await call('/api/staff/stripes')).json();
+  assert.deepEqual(body.rows, []);
+  assert.deepEqual(body.upNext.map((r) => r.first), ['Jack']);
+  give('c_jack', 1);
+  body = await (await call('/api/staff/stripes')).json();
+  assert.deepEqual(body.rows.map((r) => [r.first, r.since]), [['Jack', 7]]);
+  assert.deepEqual(body.upNext, []);
 });
 
 test('recording a stripe clears the row and starts the next interval', async () => {

@@ -684,12 +684,15 @@ export function createApp(schedule, deps = defaultDeps(), opts = {}) {
           if (method === 'GET' && path === '/api/staff/stripes') {
             const salt = requireSalt(env);
             const list = await stripeCandidates(env);
-            const rows = [];
-            for (const r of list.rows) {
-              const { ghl_contact_id: contactId, ...rest } = r;
-              rows.push({ id: await opaqueId(contactId, salt), ...rest });
-            }
-            return json({ ...list, rows });
+            const withIds = async (items) => {
+              const out = [];
+              for (const r of items) {
+                const { ghl_contact_id: contactId, ...rest } = r;
+                out.push({ id: await opaqueId(contactId, salt), ...rest });
+              }
+              return out;
+            };
+            return json({ ...list, rows: await withIds(list.rows), upNext: await withIds(list.upNext) });
           }
           if (method === 'POST' && (path === '/api/staff/promote' || path === '/api/staff/promote/undo')) {
             if (!stripesEnabled(env)) return json({ error: 'stripe tracking is off' }, 404);

@@ -194,6 +194,10 @@ Gatorade now has real GHL ids (created by the btt-ops session on 2026-09-30, pro
 - New public routes: `GET /api/tab/available`, `POST /api/tab/status`. No new GHL call, no migration.
 - Reload the iPad after deploying (see above).
 
+## Stripes, 2026-10-27
+
+The Stripes tab now has a second list, "One class away": kids at 6 classes since their last stripe (one under `STRIPE_CLASSES`). No record button on those rows; the next check-in moves them up to the eligible list. Staff page only, no migration.
+
 ## Still open after go-live
 
 - Rotate `STAFF_PIN`; the first one was pasted into a chat.

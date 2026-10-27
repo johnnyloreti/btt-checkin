@@ -2,7 +2,8 @@
 //
 // The tab surfaces who has crossed a threshold. It never says a promotion is
 // owed: class count is one input, the instructor decides. Wording in the UI
-// is "eligible for review", never "due".
+// is "eligible for review", never "due". Kids one class short are listed
+// separately as a heads-up, with no way to record from that list.
 //
 // Eligibility is attended classes since the member's most recent recorded
 // promotion, or all attended classes if they have none.
@@ -33,11 +34,36 @@ export function stripesEnabled(env) {
  *
  * members: [{ ghl_contact_id, first_name, last_name, programs: [key], lifetime }]
  * lastByContact: Map<contactId, { at_class_count, awarded_on, kind }>
- *
- * A promotion recorded and then attendance voided can leave lifetime below
- * the count at award time; that clamps to zero rather than going negative.
  */
 export function eligibleForStripe(members, lastByContact, cfg) {
+  const rows = countSince(members, lastByContact, cfg).filter((r) => r.since >= cfg.threshold);
+  for (const r of rows) {
+    // 22 classes past a 7-class threshold is worth three, which staff
+    // should see rather than having to divide in their head.
+    r.worth = Math.floor(r.since / cfg.threshold);
+  }
+  rows.sort((a, b) => b.since - a.since || a.first.localeCompare(b.first));
+  return rows;
+}
+
+/**
+ * Who is one class short, so staff can see in the morning who would cross
+ * the threshold at tonight's class (Johnny, 2026-10-27). A heads-up only:
+ * the UI offers no record button on these rows. Once the next check-in
+ * lands they move to the eligible list by themselves. A threshold of 1 has
+ * no "one away".
+ */
+export function upNextForStripe(members, lastByContact, cfg) {
+  if (cfg.threshold < 2) return [];
+  const rows = countSince(members, lastByContact, cfg).filter((r) => r.since === cfg.threshold - 1);
+  rows.sort((a, b) => a.first.localeCompare(b.first) || a.last.localeCompare(b.last));
+  return rows;
+}
+
+// Classes since the last award for every member in a covered program.
+// A promotion recorded and then attendance voided can leave lifetime below
+// the count at award time; that clamps to zero rather than going negative.
+function countSince(members, lastByContact, cfg) {
   if (cfg.programs.length === 0) return [];
   const rows = [];
   for (const m of members) {
@@ -45,23 +71,17 @@ export function eligibleForStripe(members, lastByContact, cfg) {
     if (!programs.some((p) => cfg.programs.includes(String(p).toLowerCase()))) continue;
     const last = lastByContact.get(m.ghl_contact_id) || null;
     const base = last ? Number(last.at_class_count) || 0 : 0;
-    const since = Math.max(0, Number(m.lifetime || 0) - base);
-    if (since < cfg.threshold) continue;
     rows.push({
       ghl_contact_id: m.ghl_contact_id,
       first: m.first_name,
       last: m.last_name,
       programs,
       lifetime: Number(m.lifetime || 0),
-      since,
-      // 22 classes past a 7-class threshold is worth three, which staff
-      // should see rather than having to divide in their head.
-      worth: Math.floor(since / cfg.threshold),
+      since: Math.max(0, Number(m.lifetime || 0) - base),
       lastAwardedOn: last ? last.awarded_on : null,
       lastKind: last ? last.kind : null,
     });
   }
-  rows.sort((a, b) => b.since - a.since || a.first.localeCompare(b.first));
   return rows;
 }
 
@@ -102,12 +122,17 @@ export async function membersWithCounts(env) {
 /** The stripe tab's list. Empty when the migration is pending or the feature is off. */
 export async function stripeCandidates(env) {
   const cfg = stripeConfig(env);
-  if (cfg.programs.length === 0) return { enabled: false, threshold: cfg.threshold, rows: [] };
+  if (cfg.programs.length === 0) return { enabled: false, threshold: cfg.threshold, rows: [], upNext: [] };
   if (!(await hasPromotionsTable(env))) {
-    return { enabled: false, threshold: cfg.threshold, rows: [], pendingMigration: true };
+    return { enabled: false, threshold: cfg.threshold, rows: [], upNext: [], pendingMigration: true };
   }
   const [members, last] = await Promise.all([membersWithCounts(env), lastPromotions(env)]);
-  return { enabled: true, threshold: cfg.threshold, rows: eligibleForStripe(members, last, cfg) };
+  return {
+    enabled: true,
+    threshold: cfg.threshold,
+    rows: eligibleForStripe(members, last, cfg),
+    upNext: upNextForStripe(members, last, cfg),
+  };
 }
 
 /**
