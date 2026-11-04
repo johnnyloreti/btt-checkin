@@ -13,13 +13,17 @@ const schedule = loadSchedule(readRepoFile('schedule.json'));
 const ITEMS = loadTabItems(readRepoFile('tab-items.json'));
 const ON = { TAB_ITEMS: 'water,hydration', TAB_PROGRAMS: 'adult', PIN_PEPPER: 'a-long-pepper-for-tests' };
 
-test('tab-items.json in the repo is valid: Water, LMNT and Gatorade', () => {
-  assert.deepEqual(Object.keys(ITEMS), ['water', 'hydration', 'gatorade']);
+test('tab-items.json in the repo is valid: Water, Hydrate, Gatorade and Protein', () => {
+  assert.deepEqual(Object.keys(ITEMS), ['water', 'hydration', 'gatorade', 'protein']);
   assert.equal(ITEMS.water.amount_cents, 100);
   assert.equal(ITEMS.hydration.amount_cents, 300);
-  assert.equal(ITEMS.hydration.label, 'LMNT', 'renamed 2026-09-29; the key and GHL product stay');
+  assert.equal(ITEMS.hydration.label, 'Hydrate', 'Hydrate until 2026-11-04; the key and GHL product stay');
   assert.equal(ITEMS.gatorade.label, 'Gatorade');
   assert.equal(ITEMS.gatorade.amount_cents, 200);
+  assert.equal(ITEMS.protein.label, 'Protein');
+  assert.equal(ITEMS.protein.amount_cents, 400);
+  assert.equal(ITEMS.protein.product_id, '6aebadec04da892e4be5f656');
+  assert.equal(ITEMS.protein.price_id, '6aebadf61a455f8fe7fd0c99');
 });
 
 test('loadTabItems tolerates a BOM and CRLF, and fails loudly on bad JSON', () => {
@@ -48,7 +52,7 @@ test('tabConfig: off when TAB_ITEMS is empty, on with the listed items in order'
 
   const on = tabConfig(ON, ITEMS);
   assert.equal(on.enabled, true);
-  assert.deepEqual(on.items.map((i) => [i.key, i.label, i.amountCents]), [['water', 'Water', 100], ['hydration', 'LMNT', 300]]);
+  assert.deepEqual(on.items.map((i) => [i.key, i.label, i.amountCents]), [['water', 'Water', 100], ['hydration', 'Hydrate', 300]]);
   assert.equal(on.items[0].productId, ITEMS.water.product_id);
   assert.equal(on.items[0].priceId, ITEMS.water.price_id);
   assert.deepEqual(on.programs, ['adult']);

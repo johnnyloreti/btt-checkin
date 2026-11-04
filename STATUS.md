@@ -198,6 +198,10 @@ Gatorade now has real GHL ids (created by the btt-ops session on 2026-09-30, pro
 
 The Stripes tab now has a second list, "One class away": kids at 6 classes since their last stripe (one under `STRIPE_CLASSES`). No record button on those rows; the next check-in moves them up to the eligible list. Staff page only, no migration.
 
+## Drinks, 2026-11-04
+
+Kiosk drinks: Water $1, Hydrate $3 (was "LMNT"; same GHL product), Gatorade $2, Protein $4 (new GHL product `6aebadec04da892e4be5f656`, price `6aebadf61a455f8fe7fd0c99`, SKU `DRINK-PROTEIN`). Reload the iPad after deploying.
+
 ## Still open after go-live
 
 - Rotate `STAFF_PIN`; the first one was pasted into a chat.

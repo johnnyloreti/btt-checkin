@@ -587,6 +587,8 @@ These ids are real: the btt-ops session created both products through the GHL AP
 
 **Gatorade, $2, added 2026-09-29 (Johnny).** Shipped first with made-up ids at Johnny's instruction; the real product was created by the btt-ops session on 2026-09-30 and read back: "Gatorade", PHYSICAL, available in store, SKU `DRINK-GATORADE`, one-time $2.00 USD, product `6abc53e2d885033ef3478209`, price `6abc53e3c566ebca38ae323c`. Any Gatorade bought before that deploy is stored with the made-up ids and will make GHL reject that payer's invoice; settle it with Charged at POS.
 
+**2026-11-04 (Johnny):** the `hydration` label is now **"Hydrate"** (was "LMNT"; key and GHL product unchanged). **Protein, $4, added**: GHL product "Protein" created through the HighLevel connector the same day and read back, PHYSICAL, available in store, SKU `DRINK-PROTEIN`, one-time $4.00 USD, product `6aebadec04da892e4be5f656`, price `6aebadf61a455f8fe7fd0c99`. `TAB_ITEMS = "water,hydration,gatorade,protein"`.
+
 #### Minimum charge (Johnny, 2026-09-25)
 
 A payer is charged when their open tab reaches **$5 (`TAB_MIN_CENTS`) or their oldest open purchase is 28 days old (`TAB_MAX_ROLL_DAYS`), whichever comes first.** Anyone below both rolls to the next close-out. That keeps card fees (about 2.9% plus 30¢ per charge) from eating a third of a $1 water, without letting a light buyer's tab roll forever.

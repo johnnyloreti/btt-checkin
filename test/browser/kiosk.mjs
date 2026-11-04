@@ -41,7 +41,7 @@ const CURRENT = {
 };
 
 const state = { failCheckins: false, checkins: [], seen: new Set(), purchases: [], links: [], pins: { cccccccccccccccccccc: '1234' }, failPurchases: false, locked: new Set(), statusCalls: [], failStatus: false };
-const TAB_ITEMS = [{ key: 'water', label: 'Water', amountCents: 100, price: '$1' }, { key: 'hydration', label: 'LMNT', amountCents: 300, price: '$3' }, { key: 'gatorade', label: 'Gatorade', amountCents: 200, price: '$2' }];
+const TAB_ITEMS = [{ key: 'water', label: 'Water', amountCents: 100, price: '$1' }, { key: 'hydration', label: 'Hydrate', amountCents: 300, price: '$3' }, { key: 'gatorade', label: 'Gatorade', amountCents: 200, price: '$2' }, { key: 'protein', label: 'Protein', amountCents: 400, price: '$4' }];
 // Adults may buy (María has a PIN, Jake does not); kids never see the row.
 const ADULTS = new Set(['cccccccccccccccccccc', '33333333333333333333']);
 const readBody = (req) => new Promise((resolve) => { let b = ''; req.on('data', (d) => { b += d; }); req.on('end', () => resolve(JSON.parse(b || '{}'))); });
@@ -235,8 +235,8 @@ await step('drink tab: an adult with a PIN sees the row, types the PIN, the drin
   await page.click('#checkin-anyway');
   await page.waitForSelector('#success.active');
   await page.waitForSelector('#tab.active');
-  assert.deepEqual(await page.locator('.drink .n').allTextContents(), ['Water', 'LMNT', 'Gatorade']);
-  assert.deepEqual(await page.locator('.drink .p').allTextContents(), ['$1', '$3', '$2']);
+  assert.deepEqual(await page.locator('.drink .n').allTextContents(), ['Water', 'Hydrate', 'Gatorade', 'Protein']);
+  assert.deepEqual(await page.locator('.drink .p').allTextContents(), ['$1', '$3', '$2', '$4']);
   assert.equal(await page.locator('#tab-ask').textContent(), 'Thirsty?');
   assert.match(await page.locator('#tab-note').textContent(), /Charged to your account/);
   await page.screenshot({ path: join(OUT, 'ipad-drinks.png') });
@@ -277,7 +277,7 @@ await step('drink tab: no PIN yet shows the drinks and a gold setup panel; a dri
   await page.waitForSelector('#checkin-anyway');
   await page.click('#checkin-anyway');
   await page.waitForSelector('#pin-link');
-  assert.equal(await page.locator('.drink.preview').count(), 3);
+  assert.equal(await page.locator('.drink.preview').count(), 4);
   assert.equal(await page.locator('#tab-ask').textContent(), 'Thirsty?');
   assert.match(await page.locator('#pin-panel .pin-head').textContent(), /Put drinks on your tab/);
   assert.match(await page.locator('#pin-panel .pin-line').textContent(), /Set up a purchase PIN once/);
