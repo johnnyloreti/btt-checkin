@@ -133,7 +133,7 @@ Kids 6-9  11:00 AM
 
 **Add a class** (on the member screen, added 2026-09-24) is the way in when one person was missed rather than a whole class: three taps instead of walking the date bar back and opening the class. Pick the day (the picker is bounded by `STAFF_BACKDATE_DAYS`, so it never offers a day the server would refuse), see only that member's classes for it, tap one. A class they are already on is marked, and tapping it anyway is a harmless duplicate. Open mat is always offered. If nothing in their program runs that day, that day's other classes are listed rather than none, because staff know better than the program tag does.
 
-No belt tracking, no notes, no billing in V1. Promotions since arrived as an approved V2 item (§15.2), belts as §15.4, the Away tab as §15.5, the Trends tab as §15.6, the progress page link as §15.7, and lesson notes with the Plan tab as §15.8.
+No belt tracking, no notes, no billing in V1. Promotions since arrived as an approved V2 item (§15.2), belts as §15.4, the Away tab as §15.5, the Trends tab as §15.6, the progress page link as §15.7, and lesson notes with the Plan tab as §15.8. Members have their own way in at `/member` (§15.9).
 
 ---
 
@@ -753,3 +753,28 @@ Plain text, up to 2,000 characters, shown with line breaks and never as markup. 
 **Schema:** migration `src/db/migrations/007_lessons.sql` creates `lesson_plans` and `class_notes`. Per the §15.1 rule, `hasLessonTables` in `src/schema-caps.js` guards them: before the migration the lesson boxes and the Plan tab are hidden, Tonight and the roster load as before, a save is refused naming the file, and `/health` goes `ok: false` naming it. `LESSON_NOTES = "off"` turns the feature off and quiets `/health`. Nothing on the check-in path reads these tables.
 
 **Not built, the way it would grow:** a technique library to pick from, copying a week forward, a plan that repeats on a cycle, and showing the week's theme to members on the progress page.
+
+### 15.9 Member login page (approved 2026-11-19)
+
+Johnny: "a separate page for members like we did for staff with a log in or PIN number". `/member` is the way in to the progress page (§15.7) that needs no staff, and the address that goes on a poster. He chose: a PIN, with "Text me my link" beside it, and the PIN is **the purchase PIN members already have** (§15.3), not a second one.
+
+**The page.** Type a name and tap it, the kiosk's search. Then:
+- **PIN:** four digits, "Open my page". A right PIN returns the account's progress link and the page opens.
+- **Text me my link:** the §15.7 link is written to the contact's `PROGRESS_FIELD` and GHL texts it. One a day: the value carries the day only, so a second tap the same day changes nothing and sends nothing, and the public button cannot be used to flood a phone. (A staff "Text it" carries the minute too and can be sent again.)
+- **Set up or reset my PIN:** the same one-time setup link the kiosk sends (§15.3), under the same ten-minute limit.
+
+**The account.** For a member with a parent linked (`payer_contact_id`, §15.1) the account is the parent's: the parent's PIN, the parent's phone, and a page with every kid of theirs on it. A kid's own contact is never asked for a PIN. Responses never say which contact a text went to.
+
+**No session.** The link is the key. After a right PIN, or after opening a texted link, the page address is remembered in the phone's `localStorage`, so `/member` goes straight back to it. "Not you? Switch member" on the page forgets it.
+
+**Guessing.** A four-digit PIN on a public page can be guessed in a way the iPad at the desk cannot, so web tries are counted on their own, in `pin_failures` under `web:<contact id>`:
+- `WEB_FAIL_LIMIT` (5) wrong tries on one account in 24 hours pause PIN login for that account, the right PIN included.
+- `WEB_GLOBAL_LIMIT` (30) wrong tries across every account in 24 hours pause PIN login for everyone.
+- A pause **never touches the kiosk**: `memberLogin` in `src/member.js` does not write `purchase_pins`, so a stranger guessing online cannot lock a member out of buying a drink, and a kiosk lock does not stop a login. The text link works throughout.
+- Web tries show in the staff Tab screen's "wrong PINs today" count.
+
+What a right guess gets: one family's progress page, and the knowledge of a PIN that only spends at the kiosk in person, under staff review (§15.3). The limits make a guess slow, not impossible. That is the trade Johnny accepted by choosing one PIN over two.
+
+**Routes, all public and rate-limited:** `GET /member`, `GET /api/member/options`, `POST /api/member/login`, `POST /api/member/link`, `POST /api/member/pin-link`. `PROGRESS_PAGE = "off"` removes them. PIN login needs the tab's tables and `PIN_PEPPER`; without them the page offers the text link only. No migration.
+
+**Depends on Johnny's GHL workflow** "Check-In: Progress link" (§15.7) for the text link to arrive.

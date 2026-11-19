@@ -25,12 +25,13 @@ import { allowRequest, PUBLIC, LOGIN } from './ratelimit.js';
 import { recordCheckin } from './checkin.js';
 import { today, classRoster, voidAttendance, memberHistory, awayList, trends } from './staff.js';
 import { lessonsEnabled, lessonFor, lessonsOn, weekPlan, savePlan, saveNote } from './lessons.js';
-import { progressEnabled, progressFieldKey, progressPage, progressLinkFor, writeProgressLink } from './progress.js';
+import { progressEnabled, progressFieldKey, progressPage, progressLinkFor, writeProgressLink, linkContactFor } from './progress.js';
+import { memberLogin } from './member.js';
 import { localParts, localDayBounds } from './time.js';
 
 /** Static files the Worker will hand to the assets binding. Everything else is 404. */
-const PUBLIC_ASSETS = new Set(['/', '/index.html', '/search.js', '/logo.png', '/waiver-qr.png', '/favicon.ico', '/pin', '/pin.html', '/me', '/me.html']);
-const PUBLIC_API = new Set(['/api/roster', '/api/current-class', '/api/checkin', '/api/tab/pin-link', '/api/tab/pin-token', '/api/tab/pin-set', '/api/tab/purchase', '/api/tab/status', '/api/tab/available', '/api/progress']);
+const PUBLIC_ASSETS = new Set(['/', '/index.html', '/search.js', '/logo.png', '/waiver-qr.png', '/favicon.ico', '/pin', '/pin.html', '/me', '/me.html', '/member', '/member.html']);
+const PUBLIC_API = new Set(['/api/roster', '/api/current-class', '/api/checkin', '/api/tab/pin-link', '/api/tab/pin-token', '/api/tab/pin-set', '/api/tab/purchase', '/api/tab/status', '/api/tab/available', '/api/progress', '/api/member/options', '/api/member/login', '/api/member/link', '/api/member/pin-link']);
 
 export function json(body, status = 200, headers = {}) {
   return new Response(JSON.stringify(body), {
@@ -260,13 +261,14 @@ export function defaultDeps() {
         link,
         now,
       ),
-    progressLink: (env, contactId, link, now) =>
+    progressLink: (env, contactId, link, now, opts) =>
       writeProgressLink(
         env,
         { getFieldIds: (at) => getFieldIds(() => fetchCustomFieldIds(env), at), putContact: (id, fields) => ghlPutContactCustomFields(env, id, fields) },
         contactId,
         link,
         now,
+        opts,
       ),
     now: () => new Date(),
   };
@@ -367,8 +369,9 @@ export function createApp(schedule, deps = defaultDeps(), opts = {}) {
       try {
         if (method === 'GET' && PUBLIC_ASSETS.has(path)) {
           // The progress page (§15.7) is a page only while the feature is on.
-          if ((path === '/me' || path === '/me.html') && !progressEnabled(env)) return json({ error: 'not found' }, 404);
-          return asset(env, request, path === '/' ? '/index.html' : path === '/pin' ? '/pin.html' : path === '/me' ? '/me.html' : path);
+          if (['/me', '/me.html', '/member', '/member.html'].includes(path) && !progressEnabled(env)) return json({ error: 'not found' }, 404);
+          const page = { '/': '/index.html', '/pin': '/pin.html', '/me': '/me.html', '/member': '/member.html' }[path];
+          return asset(env, request, page || path);
         }
 
         if (method === 'GET' && path === '/health') {
@@ -423,6 +426,61 @@ export function createApp(schedule, deps = defaultDeps(), opts = {}) {
         if (method === 'GET' && path === '/api/progress') {
           const page = await progressPage(env, schedule, url.searchParams.get('t'), now());
           return page ? json(page) : json({ ok: false }, 404);
+        }
+
+        // ---- member login page, public (§15.9) ----
+        if (path.startsWith('/api/member/')) {
+          if (!progressEnabled(env)) return json({ error: 'not found' }, 404);
+          const at = now();
+          // A PIN can be typed only while the tab's PIN tables and pepper exist.
+          const tabCfg = await tabReady(env);
+          const canPin = Boolean(tabCfg) && String(env.PIN_PEPPER || '').length >= 16;
+          const canText = Boolean(progressFieldKey(env));
+          if (method === 'GET' && path === '/api/member/options') return json({ enabled: true, canPin, canText });
+          if (method === 'POST' && ['/api/member/login', '/api/member/link', '/api/member/pin-link'].includes(path)) {
+            const body = await readJson(request);
+            if (!body) return json({ error: 'expected JSON body' }, 400);
+            const member = await resolveMember(env, body.contactId);
+            if (!member) return json({ error: 'unknown member' }, 404);
+            // The account is the parent's when one is linked (§15.1): their
+            // PIN, their phone, and a page with every kid of theirs on it.
+            const account = linkContactFor(member);
+
+            if (path === '/api/member/login') {
+              if (!canPin) return json({ ok: false, reason: 'off' }, 409);
+              const r = await memberLogin(env, account, body.pin, at);
+              if (!r.ok) {
+                const status = r.reason === 'paused' ? 423 : r.reason === 'no_pin' ? 409 : r.reason === 'bad_format' ? 400 : 401;
+                return json({ ok: false, reason: r.reason, left: r.left }, status);
+              }
+              const link = await progressLinkFor(env, member, '');
+              return json({ ok: true, url: link.url });
+            }
+
+            if (path === '/api/member/link') {
+              if (!canText) return json({ ok: false, reason: 'off' }, 409);
+              const link = await progressLinkFor(env, member, publicOrigin(env, url));
+              const r = deps.progressLink ? await deps.progressLink(env, link.contactId, link.url, at) : { ok: false, reason: 'no link writer' };
+              if (!r.ok) {
+                await logSyncRow(env, 'progress_link', 'failed', { contactId: link.contactId, reason: r.reason }, at);
+                return json({ error: 'could not send the link' }, 502);
+              }
+              return json({ ok: true });
+            }
+
+            // Set up or reset the PIN: the same one-time link the kiosk sends
+            // (§15.3), for the account, under the same 10-minute limit.
+            if (!canPin) return json({ ok: false, reason: 'off' }, 409);
+            const t = await createSetupToken(env, account, 'link', at);
+            if (!t.ok) return json({ ok: true, sent: false, reason: t.reason });
+            const r = deps.pinLink ? await deps.pinLink(env, account, setupLink(tabCfg, url, t.token), at) : { ok: false, reason: 'no link writer' };
+            if (!r.ok) {
+              await logSyncRow(env, 'pin_link', 'failed', { contactId: account, reason: r.reason }, at);
+              return json({ error: 'could not send the link' }, 502);
+            }
+            return json({ ok: true, sent: true });
+          }
+          return json({ error: 'not found' }, 404);
         }
 
         // ---- drink tab, public (§15.3) ----
@@ -559,8 +617,8 @@ export function createApp(schedule, deps = defaultDeps(), opts = {}) {
             const member = await resolveMember(env, body.contactId);
             if (!member) return json({ error: 'unknown member' }, 404);
             const link = await progressLinkFor(env, member, publicOrigin(env, url));
-            const r = deps.progressLink ? await deps.progressLink(env, link.contactId, link.url, now()) : { ok: false, reason: 'no link writer' };
-            if (!r.ok) console.warn(`progress link not written: ${r.reason}`);
+            const r = deps.progressLink ? await deps.progressLink(env, link.contactId, link.url, now(), { resend: true }) : { ok: false, reason: 'no link writer' };
+            if (!r.ok) await logSyncRow(env, 'progress_link', 'failed', { contactId: link.contactId, reason: r.reason }, now());
             return json({ ok: r.ok, to: link.to, reason: r.ok ? undefined : r.reason });
           }
           if (method === 'POST' && path === '/api/staff/add') {

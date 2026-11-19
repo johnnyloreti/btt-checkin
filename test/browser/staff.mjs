@@ -17,6 +17,7 @@ import { loadTabItems } from '../../src/tab.js';
 import { recordPurchase } from '../../src/purchases.js';
 import { tabConfig } from '../../src/tab.js';
 import { progressToken } from '../../src/progress.js';
+import { createSetupToken, completeSetup } from '../../src/pin.js';
 import { memoryD1 } from '../d1.js';
 import { CONTACTS } from '../fixtures/contacts.js';
 
@@ -53,10 +54,12 @@ const fakeGhl = {
   listInvoices: async (e, id) => ghlState.invoices[id] || [],
 };
 const progressLinks = [];
+const pinLinks = [];
 const app = createApp(schedule, {
   runRosterSync: async () => ({ outcome: 'ok', members: 7 }),
   ghl: fakeGhl,
   progressLink: async (e, contactId, url) => { progressLinks.push([contactId, url]); return { ok: true }; },
+  pinLink: async (e, contactId, link) => { pinLinks.push([contactId, link]); return { ok: true }; },
   now: () => NOW,
 }, { tabItems });
 
@@ -611,6 +614,76 @@ await step('close-out: review shows the card or the reason, then one confirm cha
   assert.equal(env.DB.raw.prepare('SELECT state FROM closeout_payers').get().state, 'paid');
   await page.click('#closeout-back');
   await page.waitForSelector('#tabview.active');
+});
+
+await step('member page: pick a name, a wrong PIN, the right PIN, remembered on the phone, and text me my link', async () => {
+  // Dan's PIN, set the way the setup link sets it.
+  const t = await createSetupToken(env, 'c_dan', 'staff', NOW);
+  assert.equal((await completeSetup(env, t.token, '4821', NOW)).ok, true);
+  const danToken = await progressToken('c_dan', env.ID_SALT);
+
+  const phoneCtx = await browser.newContext({ ...devices['iPhone 13'], deviceScaleFactor: 1 });
+  const m = await phoneCtx.newPage();
+  const mErrors = [];
+  m.on('pageerror', (e) => mErrors.push(String(e)));
+  await m.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
+  await m.goto(`${base}/member`);
+  await m.waitForSelector('#find.active');
+  assert.equal(await m.locator('#find h1').textContent(), 'Your progress');
+  await m.fill('#name', 'da');
+  await m.waitForSelector('.tile');
+  await m.screenshot({ path: join(OUT, 'member-search.png') });
+  await m.click('.tile:has-text("Dan Kim")');
+  await m.waitForSelector('#enter.active');
+  assert.equal(await m.locator('#hello').textContent(), 'Hi Dan');
+  assert.equal(await m.locator('#pin').isVisible(), true);
+  assert.equal(await m.locator('#text-link').isVisible(), true);
+  await m.screenshot({ path: join(OUT, 'member-login.png'), fullPage: true });
+
+  await m.fill('#pin', '0000');
+  await m.click('#open');
+  await m.waitForFunction(() => /That PIN didn't match/.test(document.getElementById('msg').textContent));
+  assert.equal(await m.inputValue('#pin'), '', 'cleared for another try');
+  const text = await m.evaluate(() => document.body.innerText);
+  assert.doesNotMatch(text, /!|—|@|billing|balance|\$/i, 'copy rules');
+
+  await m.fill('#pin', '4821');
+  await m.click('#open');
+  await m.waitForURL(`**/me?t=${danToken}`);
+  await m.waitForSelector('.card');
+  assert.equal(await m.locator('.who h1').textContent(), 'Dan Kim');
+
+  // The phone remembers: /member goes straight back to the page.
+  await m.goto(`${base}/member`);
+  await m.waitForURL(`**/me?t=${danToken}`);
+  await m.waitForSelector('.card');
+  // "Not you?" forgets it and asks again.
+  await m.click('#switch');
+  await m.waitForSelector('#find.active');
+  assert.equal(await m.evaluate(() => localStorage.getItem('btt.member.link')), null);
+
+  // No PIN: the text link, to the phone on file.
+  const before = progressLinks.length;
+  await m.fill('#name', 'emma');
+  await m.click('.tile:has-text("Emma Jones")');
+  await m.waitForSelector('#enter.active');
+  await m.fill('#pin', '4821');
+  await m.click('#open');
+  await m.waitForFunction(() => /No PIN on this account yet/.test(document.getElementById('msg').textContent));
+  await m.click('#text-link');
+  await m.waitForFunction(() => /Sent\. Check your texts/.test(document.getElementById('msg').textContent));
+  assert.equal(progressLinks.length, before + 1);
+  assert.equal(progressLinks.at(-1)[0], 'c_emma');
+  // And a PIN setup link, for someone who wants one.
+  await m.click('#pin-setup');
+  await m.waitForFunction(() => /Check your texts for a link to set your PIN/.test(document.getElementById('msg').textContent));
+  assert.equal(pinLinks.at(-1)[0], 'c_emma');
+  await m.click('#back');
+  await m.waitForSelector('#find.active');
+  const wide = await m.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
+  assert.equal(wide, false, 'no horizontal scroll on a phone');
+  assert.deepEqual(mErrors, []);
+  await phoneCtx.close();
 });
 
 await step('sign out returns to the login page', async () => {

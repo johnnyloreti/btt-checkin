@@ -177,17 +177,23 @@ export async function progressLinkFor(env, member, origin) {
  * Write the link to the contact's PROGRESS_FIELD, with the allowed contact
  * write. A GHL workflow on that field does the texting (the §15.1 pattern).
  * The day on the end makes the value change once a day, so a second send on
- * another day fires the workflow again. Never throws: { ok, reason }.
+ * another day fires the workflow again; `resend` adds the minute, for staff.
+ * Never throws: { ok, reason }.
  */
-export async function writeProgressLink(env, deps, contactId, url, now = new Date()) {
+export async function writeProgressLink(env, deps, contactId, url, now = new Date(), { resend = false } = {}) {
   const key = progressFieldKey(env);
   if (!key) return { ok: false, reason: 'PROGRESS_FIELD is not set' };
   try {
     const fields = await deps.getFieldIds(now);
     const id = fields.get(key);
     if (!id) return { ok: false, reason: `custom field ${key} not found in GHL` };
-    const day = localParts(now, env.TZ || 'America/New_York').date.replace(/-/g, '');
-    await deps.putContact(contactId, [{ id, field_value: `${url}&d=${day}` }]);
+    const local = localParts(now, env.TZ || 'America/New_York');
+    const day = local.date.replace(/-/g, '');
+    // Staff can send again the same day (resend): the minute goes on too.
+    // A member asking for their own link gets one text a day at most, so the
+    // public button cannot be used to flood a phone.
+    const stamp = resend ? `${day}&s=${String(now.getUTCHours()).padStart(2, '0')}${String(now.getUTCMinutes()).padStart(2, '0')}` : day;
+    await deps.putContact(contactId, [{ id, field_value: `${url}&d=${stamp}` }]);
     return { ok: true };
   } catch (e) {
     return { ok: false, reason: e && e.message ? e.message : String(e) };

@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#09090a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="BTT Members">
+<title>BTT Bridgewater members</title>
+<link rel="apple-touch-icon" href="/logo.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root { --bg: #09090a; --bone: #f4f1e9; --gold: #e7c24c; --muted: rgba(244,241,233,.55); --line: rgba(244,241,233,.14); --tile: rgba(244,241,233,.06); --display: 'Oswald', 'Arial Narrow', sans-serif; --body: 'Inter', -apple-system, 'Helvetica Neue', Arial, sans-serif; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--bone); font-family: var(--body); -webkit-text-size-adjust: 100%; }
+  body { padding: 22px 16px 40px; padding-top: max(22px, env(safe-area-inset-top)); }
+  main { max-width: 440px; margin: 0 auto; text-align: center; }
+  .top img { width: 84px; height: 84px; display: block; margin: 0 auto 10px; }
+  .brand { font-family: var(--display); font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); font-size: 13px; margin: 0 0 18px; }
+  h1 { font-family: var(--display); font-weight: 500; font-size: 36px; margin: 0 0 8px; }
+  p.lead { font-size: 17px; color: var(--muted); margin: 0 0 20px; line-height: 1.45; }
+  .screen { display: none; }
+  .screen.active { display: block; }
+  input.search, input.pin { width: 100%; font: inherit; padding: 16px 18px; border-radius: 14px; border: 2px solid var(--line); background: var(--tile); color: var(--bone); outline: none; }
+  input.search { font-size: 20px; text-align: center; }
+  input.pin { font-size: 34px; letter-spacing: .5em; text-align: center; padding-left: calc(18px + .5em); }
+  input:focus { border-color: var(--gold); }
+  .tiles { display: grid; gap: 10px; margin-top: 14px; }
+  .tile { font-family: var(--body); text-align: left; background: var(--tile); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; color: var(--bone); cursor: pointer; width: 100%; }
+  .tile .n { font-size: 20px; font-weight: 600; }
+  .tile .p { font-size: 13px; color: var(--gold); text-transform: uppercase; letter-spacing: .05em; margin-top: 4px; }
+  .hint { color: var(--muted); font-size: 15px; min-height: 22px; margin-top: 12px; }
+  .btn { display: block; width: 100%; font-family: var(--display); font-weight: 600; font-size: 22px; letter-spacing: .08em; text-transform: uppercase; padding: 16px; border-radius: 14px; border: none; background: var(--gold); color: #1a1607; cursor: pointer; margin-top: 14px; }
+  .btn.secondary { background: transparent; color: var(--bone); border: 2px solid var(--line); }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .or { color: var(--muted); font-size: 14px; letter-spacing: .06em; text-transform: uppercase; margin: 24px 0 2px; }
+  .msg { min-height: 24px; color: var(--gold); font-size: 16px; margin-top: 14px; line-height: 1.4; }
+  .link { background: none; border: none; color: var(--muted); font: inherit; font-size: 15px; padding: 12px; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; margin-top: 8px; }
+  .small { font-size: 14px; color: var(--muted); margin: 10px 0 0; line-height: 1.45; }
+</style>
+</head>
+<body>
+<main>
+  <div class="top">
+    <img src="/logo.png" alt="">
+    <p class="brand">Brazilian Top Team Bridgewater</p>
+  </div>
+
+  <section id="find" class="screen active">
+    <h1>Your progress</h1>
+    <p class="lead">Classes, belt and stripes, all in one place.</p>
+    <input id="name" class="search" type="text" placeholder="Type your name" autocomplete="off" autocorrect="off" autocapitalize="words" spellcheck="false" aria-label="Your name">
+    <div id="tiles" class="tiles"></div>
+    <div id="find-hint" class="hint"></div>
+  </section>
+
+  <section id="enter" class="screen">
+    <h1 id="hello"></h1>
+    <div id="pin-part">
+      <p class="lead">Enter your PIN, the one you use at the kiosk. For a child, use the parent's PIN.</p>
+      <form id="pin-form" autocomplete="off">
+        <input id="pin" class="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" aria-label="PIN">
+        <button id="open" class="btn" type="submit">Open my page</button>
+      </form>
+    </div>
+    <div id="text-part">
+      <p class="or" id="or-line">No PIN, or forgot it</p>
+      <button id="text-link" class="btn secondary" type="button">Text me my link</button>
+      <p class="small">It goes to the phone we have on file.</p>
+    </div>
+    <div id="msg" class="msg" role="status"></div>
+    <button id="pin-setup" class="link" type="button">Set up or reset my PIN</button><br>
+    <button id="back" class="link" type="button">Not you? Search again</button>
+  </section>
+</main>
+<script type="module">
+  import { search, displayName } from '/search.js';
+
+  const KEY = 'btt.member.link';
+  const $ = (id) => document.getElementById(id);
+  const store = {
+    get() { try { return localStorage.getItem(KEY); } catch { return null; } },
+    set(v) { try { localStorage.setItem(KEY, v); } catch { /* private mode; carry on */ } },
+    clear() { try { localStorage.removeItem(KEY); } catch { /* nothing to clear */ } },
+  };
+
+  // Someone who has opened their page on this phone goes straight back to it.
+  // "?switch=1" (from the page's "Not you?" link) skips that.
+  const switching = new URLSearchParams(location.search).has('switch');
+  const saved = store.get();
+  if (switching) store.clear();
+  else if (saved && /^\/me\?t=[0-9a-f]{32}$/.test(saved)) location.replace(saved);
+
+  let roster = [];
+  let options = { canPin: false, canText: false };
+  let picked = null;
+
+  function el(tag, cls, text) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+  function show(id) {
+    for (const s of document.querySelectorAll('.screen')) s.classList.toggle('active', s.id === id);
+  }
+  async function postJson(path, body) {
+    const res = await fetch(path, { method: 'POST', cache: 'no-store', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    return { status: res.status, body: await res.json().catch(() => ({})) };
+  }
+
+  function renderTiles() {
+    const tiles = $('tiles');
+    tiles.innerHTML = '';
+    const q = $('name').value;
+    const hits = search(roster, q);
+    for (const m of hits) {
+      const t = el('button', 'tile');
+      t.type = 'button';
+      t.append(el('div', 'n', displayName(m)), el('div', 'p', m.program || ''));
+      t.addEventListener('click', () => pick(m));
+      tiles.appendChild(t);
+    }
+    $('find-hint').textContent = q.trim().length >= 2 && hits.length === 0 ? 'No match. Check the spelling, or ask at the desk.' : '';
+  }
+  $('name').addEventListener('input', renderTiles);
+
+  function pick(m) {
+    picked = m;
+    $('hello').textContent = `Hi ${m.first || displayName(m)}`;
+    $('pin').value = '';
+    $('msg').textContent = '';
+    $('pin-part').style.display = options.canPin ? '' : 'none';
+    $('pin-setup').style.display = options.canPin ? '' : 'none';
+    $('text-part').style.display = options.canText ? '' : 'none';
+    $('or-line').style.display = options.canPin ? '' : 'none';
+    if (!options.canPin && !options.canText) $('msg').textContent = 'This page is not set up yet. Ask at the desk.';
+    show('enter');
+    if (options.canPin) $('pin').focus();
+  }
+  $('back').addEventListener('click', () => { picked = null; show('find'); $('name').focus(); });
+
+  $('pin-form').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    if (!picked) return;
+    const pin = $('pin').value;
+    if (!/^\d{4}$/.test(pin)) { $('msg').textContent = 'A PIN is four digits.'; return; }
+    $('open').disabled = true;
+    $('msg').textContent = '';
+    try {
+      const r = await postJson('/api/member/login', { contactId: picked.id, pin });
+      if (r.body.ok && r.body.url) {
+        store.set(r.body.url);
+        location.assign(r.body.url);
+        return;
+      }
+      const say = {
+        wrong: "That PIN didn't match.",
+        paused: 'PIN login is paused for this account. Use the text link, or ask at the desk.',
+        no_pin: 'No PIN on this account yet. Use the text link, or set one up below.',
+        bad_format: 'A PIN is four digits.',
+      };
+      $('msg').textContent = say[r.body.reason] || "That didn't go through. Try again, or ask at the desk.";
+    } catch {
+      $('msg').textContent = "That didn't go through. Check your connection and try again.";
+    }
+    $('pin').value = '';
+    $('open').disabled = false;
+  });
+
+  $('text-link').addEventListener('click', async () => {
+    if (!picked) return;
+    $('text-link').disabled = true;
+    try {
+      const r = await postJson('/api/member/link', { contactId: picked.id });
+      $('msg').textContent = r.body.ok
+        ? 'Sent. Check your texts. One link a day goes to the phone we have on file.'
+        : "That didn't go through. Ask at the desk.";
+    } catch {
+      $('msg').textContent = "That didn't go through. Check your connection and try again.";
+    }
+    $('text-link').disabled = false;
+  });
+
+  $('pin-setup').addEventListener('click', async () => {
+    if (!picked) return;
+    $('pin-setup').disabled = true;
+    try {
+      const r = await postJson('/api/member/pin-link', { contactId: picked.id });
+      if (r.body.ok) $('msg').textContent = r.body.sent ? 'Check your texts for a link to set your PIN.' : 'We just sent one. Check your texts.';
+      else $('msg').textContent = "That didn't go through. Ask at the desk.";
+    } catch {
+      $('msg').textContent = "That didn't go through. Check your connection and try again.";
+    }
+    $('pin-setup').disabled = false;
+  });
+
+  async function start() {
+    try {
+      const [o, r] = await Promise.all([
+        fetch('/api/member/options', { cache: 'no-store' }).then((x) => x.json()),
+        fetch('/api/roster', { cache: 'no-store' }).then((x) => x.json()),
+      ]);
+      options = { canPin: Boolean(o.canPin), canText: Boolean(o.canText) };
+      roster = Array.isArray(r) ? r : [];
+    } catch {
+      $('find-hint').textContent = 'We could not load the member list. Check your connection and try again.';
+    }
+    renderTiles();
+  }
+  start();
+</script>
+</body>
+</html>

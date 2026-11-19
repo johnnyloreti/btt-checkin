@@ -216,6 +216,7 @@ Three things from the BJJLink review, all staff page only.
 
 - **Progress page (§15.7).** A member, or a kid's parent, opens `/me?t=...` on their phone: class count, belt and stripes, this week, last 30 days, weeks in a row, next milestone, last ten classes. One link per contact; a parent's link shows all their linked kids. On the staff member screen: "Progress page", with Copy link and "Text it".
 - **Your GHL step:** publish a workflow "Check-In: Progress link": trigger Contact Changed on `progress_link`, If/Else "has value", then an SMS with `{{contact.progress_link}}`, re-entry on. The field exists already (id `ZChoWDYiPHRv90qruqmg`). Until the workflow is live, "Text it" sends nothing; Copy link works.
+- **Member login (§15.9).** `checkin.bttbridgewater.com/member`: a member picks their name, then types their purchase PIN or taps "Text me my link". For a kid it is the parent's PIN and the parent's phone. The phone remembers the page afterwards. Five wrong PINs on one account pause PIN login for that account for a day; this never locks the kiosk. This is the address for a poster or QR code.
 - **Lesson notes and the Plan tab (§15.8).** A plan per program per week and a note per class. Tonight shows the first line; the class roster has both boxes; the Plan tab lays out a week.
 - **Migration:** `src/db/migrations/007_lessons.sql`, once. The deploy survives either order; until it runs the lesson boxes are hidden and `/health` says so.
 

@@ -51,6 +51,7 @@
   .recent .t { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
   .none { color: var(--muted); font-size: 16px; padding: 6px 0; }
   .foot { text-align: center; color: var(--muted); font-size: 14px; line-height: 1.5; margin-top: 24px; }
+  .foot a { color: var(--muted); text-underline-offset: 3px; display: inline-block; padding: 10px; }
 </style>
 </head>
 <body>
@@ -61,7 +62,8 @@
   </div>
   <div id="state" class="state">One moment</div>
   <div id="cards"></div>
-  <p id="foot" class="foot" hidden>Add this page to your home screen to check back any time.<br>Questions? Ask at the desk.</p>
+  <p id="foot" class="foot" hidden>Add this page to your home screen to check back any time.<br>Questions? Ask at the desk.<br><a id="switch" href="/member?switch=1">Not you? Switch member</a></p>
+  <p id="lost" class="foot" hidden><a href="/member?switch=1">Go to the member page</a></p>
 </main>
 <script>
   const $ = (id) => document.getElementById(id);
@@ -149,6 +151,10 @@
     return c;
   }
 
+  const KEY = 'btt.member.link';
+  function remember(v) { try { localStorage.setItem(KEY, v); } catch { /* private mode; carry on */ } }
+  function forget() { try { localStorage.removeItem(KEY); } catch { /* nothing to forget */ } }
+
   async function start() {
     const token = new URLSearchParams(location.search).get('t') || '';
     let data = null;
@@ -159,7 +165,15 @@
       data = null;
     }
     if (!data) { $('state').textContent = 'We could not load this page. Check your connection and try again.'; return; }
-    if (!data.ok) { $('state').textContent = 'We could not find this page. Ask at the desk for a new link.'; return; }
+    if (!data.ok) {
+      // A link that no longer works is forgotten, so /member asks again.
+      forget();
+      $('state').textContent = 'We could not find this page. Ask at the desk for a new link.';
+      $('lost').hidden = false;
+      return;
+    }
+    // Remembered on this phone, so /member comes straight back here (§15.9).
+    remember(`/me?t=${token}`);
     $('state').hidden = true;
     for (const p of data.people) $('cards').appendChild(card(p));
     document.title = data.people.length === 1 ? `${data.people[0].first} at BTT Bridgewater` : 'BTT Bridgewater progress';
