@@ -209,7 +209,7 @@ Two things from the BJJLink review, both staff page only.
 - **Belts (§15.4).** Rank (belt and stripes) shows on the class roster, the Stripes rows and the member screen. Record a belt on the member screen; tick "They already hold this rank" for someone who walked in with one, so their class count is not reset. "Give a stripe now" is on the member screen too. Everyone reads as a white belt until a belt is recorded. The belt lists are the IBJJF ones in `wrangler.toml` (`BELTS_KIDS`, `BELTS_ADULT`); trim them if the gym uses fewer.
 - **Away tab (§15.5).** Members with no class in 14 days or more (`AWAY_DAYS`), longest away first, and a second list of members who never checked in.
 - **Migration:** `src/db/migrations/006_belts.sql`, once. The deploy survives either order; until it runs, rank is hidden and `/health` says so.
-- **GHL:** the contact field `payer_contact_id` now exists (created 2026-11-19, id `HZGvoCj68LOGxlmrCE2Z`). It is empty on every contact; the parent links still have to be filled.
+- **GHL:** the contact field `payer_contact_id` now exists (created 2026-11-19, id `HZGvoCj68LOGxlmrCE2Z`). 23 members are linked to a parent (2026-11-19). From the next roster sync, a linked kid's waiver reminder goes to the parent. A few kids are still unlinked, waiting on Johnny to name the parent. `/health` shows the count under `payerLinks`.
 
 ## Still open after go-live
 
