@@ -133,7 +133,7 @@ Kids 6-9  11:00 AM
 
 **Add a class** (on the member screen, added 2026-09-24) is the way in when one person was missed rather than a whole class: three taps instead of walking the date bar back and opening the class. Pick the day (the picker is bounded by `STAFF_BACKDATE_DAYS`, so it never offers a day the server would refuse), see only that member's classes for it, tap one. A class they are already on is marked, and tapping it anyway is a harmless duplicate. Open mat is always offered. If nothing in their program runs that day, that day's other classes are listed rather than none, because staff know better than the program tag does.
 
-No belt tracking, no notes, no billing in V1. Promotions since arrived as an approved V2 item (§15.2), belts as §15.4, the Away tab as §15.5, and the Trends tab as §15.6.
+No belt tracking, no notes, no billing in V1. Promotions since arrived as an approved V2 item (§15.2), belts as §15.4, the Away tab as §15.5, the Trends tab as §15.6, the progress page link as §15.7, and lesson notes with the Plan tab as §15.8.
 
 ---
 
@@ -285,6 +285,7 @@ Vars in `wrangler.toml`:
 - `KIOSK_BACKDATE_DAYS = "3"` and `STAFF_BACKDATE_DAYS = "30"` (§3 backdating, whole days)
 - `TAB_ITEMS`, `TAB_PROGRAMS`, `TAB_MIN_CENTS`, `TAB_MAX_ROLL_DAYS`, `TAB_AUTO_HOUR` (§15.3 drink tab; empty `TAB_ITEMS` turns it off, empty `TAB_AUTO_HOUR` makes charging button-only)
 - `BELTS_KIDS`, `BELTS_ADULT` (§15.4 belt lists; both blank turns belts off) and `AWAY_DAYS` (§15.5; "0" turns the Away tab off)
+- `PROGRESS_PAGE`, `PROGRESS_FIELD` (§15.7; "off" removes the page, a blank field leaves staff with Copy link only) and `LESSON_NOTES` (§15.8; "off" hides lesson notes)
 - `WAIVER_TAG`, `WAIVER_FIELD` (§15.1), and `PAYER_FIELD`, `WAIVER_PAYER_FIELD` (§15.1 kids, Phase 1b; either blank sends every reminder to the member's own contact)
 
 `.dev.vars.example` committed; `.dev.vars` gitignored. Parser must handle CRLF and BOM.
@@ -717,3 +718,38 @@ Johnny, continuing the BJJLink list: "let's keep going". A staff tab, **Trends**
 - Removed check-ins are not counted.
 
 Rows come from `schedule.json` as it is today, so a class dropped from the schedule moves its old check-ins to the other row. No migration, no GHL call, nothing on the kiosk.
+
+### 15.7 Member progress page (approved 2026-11-19)
+
+Johnny picked this from the BJJLink list as one of the two features worth building next. A page a member, or a kid's parent, opens on their own phone: `/me?t=<token>`.
+
+**What it shows, per person:** name and program, "Class #N", belt and stripes drawn as a belt (when §15.4 is ready), classes this week and in the last 30 days, weeks in a row with a class, the next round-number milestone ("3 classes to Class #10"), and the last ten classes. Removed check-ins are not classes. **Never:** a contact id, an email or phone, the tab, a waiver, anything about money. It also never shows the count toward the next stripe: §15.2 says the class count is one input and the instructor decides, and a number on a parent's phone would read as a promise.
+
+**The token** is `HMAC-SHA256(ID_SALT, "progress:v1:" + contact id)`, 32 hex characters. It is the same every time, so the page can be saved to a home screen, and it needs no table and no migration. It is made for a contact, not a member: a parent's link shows every kid linked to them through `payer_contact_id` (§15.1), and the parent too if they train. A token that matches nobody returns 404 and says nothing. Changing `v1` in `src/progress.js` retires every link at once; there is no per-member revoke.
+
+**How the link reaches a phone.** Only by text to the number on the contact, the §15.1 pattern: the Worker writes the link to the contact field `PROGRESS_FIELD` (`progress_link`) with the allowed contact write, and a GHL workflow on that field sends it. For a kid with a parent linked, the parent's link is written on the parent's contact. The value ends in `&d=YYYYMMDD` so it changes once a day and a second send on another day fires the workflow again. The link is **never shown on the kiosk**, where anyone can tap any name.
+
+**Staff side:** the member screen has a "Progress page" row: who the link goes to, Copy link, and a two-tap "Text it". With `PROGRESS_FIELD` blank only Copy link shows.
+
+**Routes:** `GET /me` (the page), `GET /api/progress?t=` (public, rate-limited, read-only), `POST /api/staff/progress-link` (PIN). `PROGRESS_PAGE = "off"` removes all three. `PROGRESS_FIELD` is in `requiredFieldKeys` when set, so `/health` names it if GHL lacks it.
+
+**GHL side.** The field `progress_link` was created 2026-11-19 through the HighLevel connector: single line text, key `contact.progress_link`, id `ZChoWDYiPHRv90qruqmg`. **Still Johnny's to build:** a workflow "Check-In: Progress link", trigger Contact Changed on that field, an If/Else "has value" guard, then an SMS with `{{contact.progress_link}}`, re-entry on. Until it is published, "Text it" writes the field and nothing is sent; Copy link works regardless. The field is also a merge field for any other message, such as a welcome or the win-back (§15.5).
+
+### 15.8 Lesson notes and week plans (approved 2026-11-19)
+
+The other feature Johnny picked: BJJLink's curriculum planner, started small and built to grow. Staff side only.
+
+**Two levels.** A **week plan** per program per week (Monday to Sunday, ET), which is the curriculum unit; and a **class note** per scheduled class. A class shows its own note, and under it the week's plan for its program.
+
+**Where:**
+- **Tonight:** each class row shows the first line of its lesson, the class note if there is one, otherwise the week's plan.
+- **Class roster:** two boxes above the names, "This class" and "This week, <program>", each with Add or Edit, a text box, Save and Cancel.
+- **Plan tab:** one week at a time with arrows. Each program, its plan for the week, then that week's classes with their notes, all editable in place. The tab shows only while lessons are on and migrated.
+
+Plain text, up to 2,000 characters, shown with line breaks and never as markup. Saving blank removes it. A note can only be saved for a class on the schedule for that date; open mat has none.
+
+**Routes (PIN):** `GET /api/staff/lessons?week=`, `POST /api/staff/lessons/plan`, `POST /api/staff/lessons/note`. `GET /api/staff/today` and `GET /api/staff/class` carry the lesson for display.
+
+**Schema:** migration `src/db/migrations/007_lessons.sql` creates `lesson_plans` and `class_notes`. Per the §15.1 rule, `hasLessonTables` in `src/schema-caps.js` guards them: before the migration the lesson boxes and the Plan tab are hidden, Tonight and the roster load as before, a save is refused naming the file, and `/health` goes `ok: false` naming it. `LESSON_NOTES = "off"` turns the feature off and quiets `/health`. Nothing on the check-in path reads these tables.
+
+**Not built, the way it would grow:** a technique library to pick from, copying a week forward, a plan that repeats on a cycle, and showing the week's theme to members on the progress page.

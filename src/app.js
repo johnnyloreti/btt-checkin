@@ -9,7 +9,7 @@ import {
 import { reviewPayers, payerCardStatus, startCloseout, runPayer, refreshPayer, markPaidAtPos, latestCloseout, closeoutPayers, tabTick } from './closeout.js';
 import { runRollup } from './rollup.js';
 import { notifyWaiverCheckin, waiverEnabled, logWaiverFailure, payerFieldKey } from './waiver.js';
-import { hasWaiverColumn, hasPromotionsTable, hasTabTables, hasPayerColumn, hasBeltColumns } from './schema-caps.js';
+import { hasWaiverColumn, hasPromotionsTable, hasTabTables, hasPayerColumn, hasBeltColumns, hasLessonTables } from './schema-caps.js';
 import { tabConfig, canBuy } from './tab.js';
 import { createSetupToken, readSetupToken, completeSetup, clearLockout, pinActivity, writePinLink, requirePepper } from './pin.js';
 import { hasNoCardFlag, recordPurchase, purchasesBetween, voidPurchase, memberTab, clearNoCardFlag } from './purchases.js';
@@ -24,11 +24,13 @@ import { matchClasses, windowFromEnv } from './classes.js';
 import { allowRequest, PUBLIC, LOGIN } from './ratelimit.js';
 import { recordCheckin } from './checkin.js';
 import { today, classRoster, voidAttendance, memberHistory, awayList, trends } from './staff.js';
+import { lessonsEnabled, lessonFor, lessonsOn, weekPlan, savePlan, saveNote } from './lessons.js';
+import { progressEnabled, progressFieldKey, progressPage, progressLinkFor, writeProgressLink } from './progress.js';
 import { localParts, localDayBounds } from './time.js';
 
 /** Static files the Worker will hand to the assets binding. Everything else is 404. */
-const PUBLIC_ASSETS = new Set(['/', '/index.html', '/search.js', '/logo.png', '/waiver-qr.png', '/favicon.ico', '/pin', '/pin.html']);
-const PUBLIC_API = new Set(['/api/roster', '/api/current-class', '/api/checkin', '/api/tab/pin-link', '/api/tab/pin-token', '/api/tab/pin-set', '/api/tab/purchase', '/api/tab/status', '/api/tab/available']);
+const PUBLIC_ASSETS = new Set(['/', '/index.html', '/search.js', '/logo.png', '/waiver-qr.png', '/favicon.ico', '/pin', '/pin.html', '/me', '/me.html']);
+const PUBLIC_API = new Set(['/api/roster', '/api/current-class', '/api/checkin', '/api/tab/pin-link', '/api/tab/pin-token', '/api/tab/pin-set', '/api/tab/purchase', '/api/tab/status', '/api/tab/available', '/api/progress']);
 
 export function json(body, status = 200, headers = {}) {
   return new Response(JSON.stringify(body), {
@@ -119,6 +121,7 @@ export async function health(env, schedule, now = new Date(), opts = {}) {
     if (stripesEnabled(env) && !(await hasPromotionsTable(env))) problems.push('promotions table missing: run src/db/migrations/003_promotions.sql');
     if (payerFieldKey(env) && !(await hasPayerColumn(env))) problems.push('members.payer_contact_id missing: run src/db/migrations/005_payer.sql');
     if (beltsEnabled(env) && (await hasPromotionsTable(env)) && !(await hasBeltColumns(env))) problems.push('promotions belt columns missing: run src/db/migrations/006_belts.sql');
+    if (lessonsEnabled(env) && !(await hasLessonTables(env))) problems.push('lesson tables missing: run src/db/migrations/007_lessons.sql');
     // The tab (§15.3): off, on, or misconfigured, and whether its tables exist.
     const tab = tabConfig(env, opts.tabItems || {});
     const tabSchema = await hasTabTables(env);
@@ -257,6 +260,14 @@ export function defaultDeps() {
         link,
         now,
       ),
+    progressLink: (env, contactId, link, now) =>
+      writeProgressLink(
+        env,
+        { getFieldIds: (at) => getFieldIds(() => fetchCustomFieldIds(env), at), putContact: (id, fields) => ghlPutContactCustomFields(env, id, fields) },
+        contactId,
+        link,
+        now,
+      ),
     now: () => new Date(),
   };
 }
@@ -291,6 +302,16 @@ export function createApp(schedule, deps = defaultDeps(), opts = {}) {
     return `${cfg.publicOrigin || url.origin}/pin?t=${token}`;
   }
   const now = () => (deps.now ? deps.now() : new Date());
+  function publicOrigin(env, url) {
+    return String(env.PUBLIC_ORIGIN || '').trim().replace(/\/+$/, '') || url.origin;
+  }
+  // The progress link as staff see it (§15.7): the page address, who it
+  // belongs to, and whether it can be texted from here.
+  async function memberProgressLink(env, member, url) {
+    if (!progressEnabled(env)) return { enabled: false };
+    const link = await progressLinkFor(env, member, publicOrigin(env, url));
+    return { enabled: true, url: link.url, to: link.to, canText: Boolean(progressFieldKey(env)) };
+  }
 
   async function checkin(env, body, method, ctx) {
     const member = await resolveMember(env, body.contactId);
@@ -345,7 +366,9 @@ export function createApp(schedule, deps = defaultDeps(), opts = {}) {
 
       try {
         if (method === 'GET' && PUBLIC_ASSETS.has(path)) {
-          return asset(env, request, path === '/' ? '/index.html' : path === '/pin' ? '/pin.html' : path);
+          // The progress page (§15.7) is a page only while the feature is on.
+          if ((path === '/me' || path === '/me.html') && !progressEnabled(env)) return json({ error: 'not found' }, 404);
+          return asset(env, request, path === '/' ? '/index.html' : path === '/pin' ? '/pin.html' : path === '/me' ? '/me.html' : path);
         }
 
         if (method === 'GET' && path === '/health') {
@@ -392,6 +415,14 @@ export function createApp(schedule, deps = defaultDeps(), opts = {}) {
           const body = await readJson(request);
           if (!body) return json({ error: 'expected JSON body' }, 400);
           return checkin(env, body, 'kiosk', ctx);
+        }
+
+        // ---- progress page, public (§15.7) ----
+        // What one link shows: a member, or a parent's kids. The token is
+        // the only key; an unknown one says nothing about who exists.
+        if (method === 'GET' && path === '/api/progress') {
+          const page = await progressPage(env, schedule, url.searchParams.get('t'), now());
+          return page ? json(page) : json({ ok: false }, 404);
         }
 
         // ---- drink tab, public (§15.3) ----
@@ -490,10 +521,47 @@ export function createApp(schedule, deps = defaultDeps(), opts = {}) {
           }
           if (method === 'GET' && path === '/api/staff/today') {
             const date = url.searchParams.get('date') || localParts(now(), env.TZ || tz).date;
-            return json(await today(env, schedule, date));
+            const day = await today(env, schedule, date);
+            // The plan for each class (§15.8). Absent when lessons are off
+            // or migration 007 is pending, and the screen shows no lesson.
+            const lessons = await lessonsOn(env, schedule, date);
+            for (const c of day.classes) {
+              const l = lessons.get(`${c.startLocal}|${c.name}`);
+              if (l) c.lesson = l;
+            }
+            return json({ ...day, lessons: lessons.size > 0 || ((await hasLessonTables(env)) && lessonsEnabled(env)) });
           }
           if (method === 'GET' && path === '/api/staff/class') {
-            return json(await classRoster(env, schedule, url.searchParams.get('start'), url.searchParams.get('name')));
+            const start = url.searchParams.get('start');
+            const name = url.searchParams.get('name');
+            const roster = await classRoster(env, schedule, start, name);
+            return json({ ...roster, lesson: name ? await lessonFor(env, schedule, start, name) : null });
+          }
+
+          // ---- lesson notes and week plans (§15.8) ----
+          if (method === 'GET' && path === '/api/staff/lessons') {
+            return json(await weekPlan(env, schedule, url.searchParams.get('week') || localParts(now(), env.TZ || tz).date));
+          }
+          if (method === 'POST' && (path === '/api/staff/lessons/plan' || path === '/api/staff/lessons/note')) {
+            const body = await readJson(request);
+            if (!body) return json({ error: 'expected JSON body' }, 400);
+            if (path === '/api/staff/lessons/plan') {
+              return json(await savePlan(env, schedule, { weekStart: body.weekStart, program: body.program, body: body.body, now: now() }));
+            }
+            return json(await saveNote(env, schedule, { classStartLocal: body.classStartLocal, className: body.className, body: body.body, now: now() }));
+          }
+
+          // ---- progress page link (§15.7) ----
+          if (method === 'POST' && path === '/api/staff/progress-link') {
+            if (!progressEnabled(env)) return json({ error: 'the progress page is off' }, 404);
+            const body = await readJson(request);
+            if (!body) return json({ error: 'expected JSON body' }, 400);
+            const member = await resolveMember(env, body.contactId);
+            if (!member) return json({ error: 'unknown member' }, 404);
+            const link = await progressLinkFor(env, member, publicOrigin(env, url));
+            const r = deps.progressLink ? await deps.progressLink(env, link.contactId, link.url, now()) : { ok: false, reason: 'no link writer' };
+            if (!r.ok) console.warn(`progress link not written: ${r.reason}`);
+            return json({ ok: r.ok, to: link.to, reason: r.ok ? undefined : r.reason });
           }
           if (method === 'POST' && path === '/api/staff/add') {
             const body = await readJson(request);
@@ -520,6 +588,7 @@ export function createApp(schedule, deps = defaultDeps(), opts = {}) {
               ...history,
               promotions: await promotionHistory(env, member.ghl_contact_id),
               rank: await memberRank(env, member),
+              progress: await memberProgressLink(env, member, url),
               canRecordStripe: stripesEnabled(env) && (await hasPromotionsTable(env)),
               tab,
             });

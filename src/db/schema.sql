@@ -148,3 +148,20 @@ CREATE TABLE IF NOT EXISTS tab_flags (
   payer_contact_id TEXT PRIMARY KEY,
   no_card_since    TEXT NOT NULL
 );
+
+-- Lesson notes and week plans (§15.8). Same statements as src/db/migrations/007_lessons.sql.
+CREATE TABLE IF NOT EXISTS lesson_plans (
+  week_start TEXT NOT NULL,          -- "YYYY-MM-DD", a Monday
+  program    TEXT NOT NULL,          -- program key from schedule.json
+  body       TEXT NOT NULL,
+  updated_at TEXT NOT NULL,          -- ISO UTC
+  PRIMARY KEY (week_start, program)
+);
+
+CREATE TABLE IF NOT EXISTS class_notes (
+  class_start_local TEXT NOT NULL,   -- "YYYY-MM-DDTHH:MM" ET, the scheduled start
+  class_name        TEXT NOT NULL,
+  body              TEXT NOT NULL,
+  updated_at        TEXT NOT NULL,   -- ISO UTC
+  PRIMARY KEY (class_start_local, class_name)
+);

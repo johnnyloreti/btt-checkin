@@ -78,6 +78,20 @@
   .trend .blank { color: var(--muted); }
   .trend tr.sum td { font-weight: 600; border-bottom: none; }
   .trend tr.sum.first td { border-top: 2px solid var(--line); }
+  .row .name .lesson { display: block; font-weight: 400; font-size: 14px; color: var(--muted); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 46vw; }
+  .lessonbox { background: var(--tile); border: 1px solid var(--line); border-radius: 14px; padding: 14px 18px; margin-bottom: 10px; }
+  .lessonbox .k { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); display: flex; align-items: center; gap: 12px; }
+  .lessonbox .k .edit { margin-left: auto; font: inherit; font-size: 13px; font-weight: 600; text-transform: none; letter-spacing: 0; background: none; border: 1px solid var(--line); color: var(--bone); padding: 6px 12px; border-radius: 10px; cursor: pointer; }
+  .lessonbox .body { font-size: 18px; line-height: 1.45; margin-top: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .lessonbox .body.blank { color: var(--muted); font-size: 16px; }
+  .lessonbox textarea { width: 100%; min-height: 110px; margin-top: 10px; font: inherit; font-size: 18px; line-height: 1.4; padding: 12px 14px; border-radius: 12px; border: 2px solid var(--gold); background: var(--bg); color: var(--bone); outline: none; resize: vertical; }
+  .lessonbox .acts { display: flex; gap: 10px; margin-top: 10px; align-items: center; }
+  .lessonbox .acts button { font: inherit; font-size: 15px; font-weight: 600; padding: 10px 16px; border-radius: 10px; cursor: pointer; border: 1px solid var(--line); background: none; color: var(--bone); }
+  .lessonbox .acts .save { background: var(--gold); border-color: var(--gold); color: #1a1607; }
+  .lessonbox .acts .left { margin-left: auto; color: var(--muted); font-size: 13px; }
+  .lessonbox.small { padding: 12px 16px; }
+  .lessonbox.small .body { font-size: 16px; }
+  .planprog { margin: 26px 0 10px; font-family: var(--display); font-weight: 500; font-size: 24px; }
   .rankform { flex-wrap: wrap; }
   .rankform select { font: inherit; font-size: 16px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--bone); }
   .rankform .held { display: flex; align-items: center; gap: 8px; font-size: 15px; color: var(--muted); flex: 1 1 260px; }
@@ -96,6 +110,7 @@
   <button class="tab" data-tab="stripes" type="button">Stripes</button>
   <button class="tab" data-tab="away" type="button">Away</button>
   <button class="tab" data-tab="trends" type="button">Trends</button>
+  <button class="tab" data-tab="plan" id="plan-nav" type="button" style="display:none">Plan</button>
   <button class="tab" data-tab="members" type="button">Members</button>
   <button class="tab" data-tab="tab" id="tab-nav" type="button">Tab</button>
   <button class="tab quiet" id="signout" type="button">Sign out</button>
@@ -118,6 +133,7 @@
   <section id="class" class="view">
     <button class="back" id="class-back" type="button">&#8249; Back to the day</button>
     <h2 id="class-title"></h2>
+    <div id="class-lesson"></div>
     <div id="class-list" class="list"></div>
     <button class="btn primary" id="add-student" type="button">+ Add student</button>
   </section>
@@ -142,6 +158,16 @@
       <p class="note">On the roster with no class yet. A parent who does not train can be tagged program:none in GHL.</p>
       <div id="away-never" class="list"></div>
     </div>
+  </section>
+
+  <section id="plan" class="view">
+    <div class="datebar">
+      <button id="plan-prev" type="button" aria-label="Previous week">&#8249;</button>
+      <h2 id="plan-title" style="margin:0">Plan</h2>
+      <button id="plan-next" type="button" aria-label="Next week">&#8250;</button>
+    </div>
+    <p class="note">The plan for the week, by program, and a note for any one class. A class shows its own note, or the week's plan.</p>
+    <div id="plan-box"></div>
   </section>
 
   <section id="trends" class="view">
@@ -181,6 +207,14 @@
     <button class="back" id="member-back" type="button">&#8249; Back to members</button>
     <h2 id="member-title"></h2>
     <div id="member-facts" class="facts"></div>
+    <div id="member-progress" class="list" style="display:none;margin-bottom:6px">
+      <div class="row">
+        <span class="name">Progress page</span>
+        <span class="tag" id="progress-to"></span>
+        <button class="undo" id="progress-copy" type="button">Copy link</button>
+        <button class="award" id="progress-text" type="button">Text it</button>
+      </div>
+    </div>
     <button class="btn" id="member-add-class" type="button">+ Add a class</button>
     <div id="member-tab" style="display:none">
       <h2 style="font-size:22px">Tab <span class="sub" id="member-tab-total"></span></h2>
@@ -282,7 +316,7 @@
   }
   function showView(id) {
     for (const v of document.querySelectorAll('.view')) v.classList.toggle('active', v.id === id);
-    const tab = id === 'tonight' || id === 'class' ? 'tonight' : id === 'stripes' ? 'stripes' : id === 'away' ? 'away' : id === 'trends' ? 'trends' : id === 'tabview' || id === 'closeout' ? 'tab' : 'members';
+    const tab = id === 'tonight' || id === 'class' ? 'tonight' : id === 'stripes' ? 'stripes' : id === 'away' ? 'away' : id === 'trends' ? 'trends' : id === 'plan' ? 'plan' : id === 'tabview' || id === 'closeout' ? 'tab' : 'members';
     for (const t of document.querySelectorAll('.tab[data-tab]')) t.classList.toggle('active', t.dataset.tab === tab);
     window.scrollTo(0, 0);
   }
@@ -299,6 +333,8 @@
     tz = data.timezone || tz;
     date = data.date;
     $('tonight-title').textContent = fmtDate(date);
+    // The Plan tab shows only while lesson notes are on and migrated (§15.8).
+    $('plan-nav').style.display = data.lessons ? '' : 'none';
     const list = $('tonight-list');
     list.innerHTML = '';
     if (data.classes.length === 0) {
@@ -310,9 +346,13 @@
       b.type = 'button';
       b.dataset.start = c.startLocal;
       b.dataset.name = c.name;
+      const name = el('span', 'name', c.name === UNSCHEDULED ? 'Open mat, unscheduled' : c.name);
+      // First line of tonight's lesson: the class note, or the week's plan.
+      const lesson = c.lesson ? (c.lesson.note || c.lesson.plan) : '';
+      if (lesson) name.appendChild(el('span', 'lesson', lesson.split('\n')[0]));
       b.append(
         el('span', 'time', c.start ? formatTime(c.start) : 'Any time'),
-        el('span', 'name', c.name === UNSCHEDULED ? 'Open mat, unscheduled' : c.name),
+        name,
         el('span', 'count', `${c.count} checked in`),
       );
       b.addEventListener('click', () => openClass(c));
@@ -358,6 +398,7 @@
   }
   async function loadClass() {
     const data = await api(`/api/staff/class?start=${encodeURIComponent(current.startLocal)}&name=${encodeURIComponent(current.name)}`);
+    renderClassLesson(data.lesson);
     const list = $('class-list');
     list.innerHTML = '';
     if (data.rows.length === 0) list.appendChild(el('div', 'empty', 'Nobody checked in yet'));
@@ -552,6 +593,92 @@
     }
   }
 
+  // ---------- lesson notes and week plans (§15.8) ----------
+  const LESSON_MAX = 2000;
+  // One box: the text and an Edit button, or a textarea with Save and Cancel.
+  // onSave gets the new text and returns what was stored.
+  function lessonBox({ label, text, blank, small, onSave }) {
+    const box = el('div', `lessonbox${small ? ' small' : ''}`);
+    let value = text || '';
+    const view = () => {
+      box.innerHTML = '';
+      const k = el('div', 'k');
+      k.appendChild(el('span', '', label));
+      const edit = el('button', 'edit', value ? 'Edit' : 'Add');
+      edit.type = 'button';
+      edit.addEventListener('click', editMode);
+      k.appendChild(edit);
+      box.append(k, el('div', `body${value ? '' : ' blank'}`, value || blank));
+    };
+    const editMode = () => {
+      box.innerHTML = '';
+      const area = el('textarea');
+      area.maxLength = LESSON_MAX;
+      area.value = value;
+      const acts = el('div', 'acts');
+      const save = el('button', 'save', 'Save');
+      const cancel = el('button', '', 'Cancel');
+      const left = el('span', 'left');
+      const count = () => { left.textContent = `${LESSON_MAX - area.value.length} left`; };
+      save.type = 'button';
+      cancel.type = 'button';
+      area.addEventListener('input', count);
+      cancel.addEventListener('click', view);
+      save.addEventListener('click', async () => {
+        save.disabled = true;
+        try {
+          value = await onSave(area.value);
+          toast(value ? 'Saved' : 'Cleared');
+          view();
+        } catch (e) {
+          save.disabled = false;
+          toast(`Could not save: ${e.message}`);
+        }
+      });
+      acts.append(save, cancel, left);
+      box.append(el('div', 'k', label), area, acts);
+      count();
+      area.focus();
+    };
+    view();
+    return box;
+  }
+  const savePlan = (weekStart, program) => async (body) => (await post('/api/staff/lessons/plan', { weekStart, program, body })).plan;
+  const saveNote = (classStartLocal, className) => async (body) => (await post('/api/staff/lessons/note', { classStartLocal, className, body })).note;
+  function renderClassLesson(lesson) {
+    const box = $('class-lesson');
+    box.innerHTML = '';
+    if (!lesson || !lesson.enabled || !lesson.scheduled) return;
+    box.append(
+      lessonBox({ label: 'This class', text: lesson.note, blank: 'No note for this class.', onSave: saveNote(current.startLocal, current.name) }),
+      lessonBox({ label: `This week, ${lesson.programLabel}`, text: lesson.plan, blank: 'No plan for the week yet.', onSave: savePlan(lesson.weekStart, lesson.program) }),
+    );
+  }
+  let planWeek = null;
+  async function loadPlan() {
+    const box = $('plan-box');
+    box.innerHTML = '';
+    let data;
+    try {
+      data = await api(`/api/staff/lessons${planWeek ? `?week=${planWeek}` : ''}`);
+    } catch (e) {
+      box.appendChild(el('div', 'empty', e.message));
+      return;
+    }
+    planWeek = data.weekStart;
+    $('plan-title').textContent = `Week of ${fmtDate(data.weekStart).replace(/^\w+, /, '')}`;
+    for (const p of data.programs) {
+      box.appendChild(el('div', 'planprog', p.label));
+      box.appendChild(lessonBox({ label: 'Plan for the week', text: p.plan, blank: 'No plan for the week yet.', onSave: savePlan(data.weekStart, p.key) }));
+      for (const c of p.classes) {
+        const label = `${fmtDate(c.date)}, ${formatTime(c.start)}${c.name === p.label ? '' : `, ${c.name}`}`;
+        box.appendChild(lessonBox({ label, text: c.note, blank: 'Follows the week\'s plan.', small: true, onSave: saveNote(c.startLocal, c.name) }));
+      }
+    }
+  }
+  $('plan-prev').addEventListener('click', () => { planWeek = shiftDate(planWeek, -7); loadPlan(); });
+  $('plan-next').addEventListener('click', () => { planWeek = shiftDate(planWeek, 7); loadPlan(); });
+
   // ---------- trends (§15.6) ----------
   async function loadTrends() {
     const box = $('trends-box');
@@ -620,6 +747,7 @@
     }
     fact('Roster synced', d.syncedAt ? `${fmtDate(d.syncedAt.slice(0, 10))} ${fmtClock(d.syncedAt)}` : 'never');
     fact('GHL rollup', d.rollupPending ? 'Pending tonight' : 'Up to date');
+    renderProgressRow(d);
     renderRankForm(d);
     renderPromotions(d, m);
     renderMemberTab(d, m);
@@ -646,6 +774,37 @@
     }
     showView('member');
   }
+  // The member's progress page (§15.7): copy the link, or have GHL text it
+  // to the member, or to the parent when one is linked.
+  let progressUrl = '';
+  function renderProgressRow(d) {
+    const p = d.progress && d.progress.enabled ? d.progress : null;
+    $('member-progress').style.display = p ? '' : 'none';
+    progressUrl = p ? p.url : '';
+    if (!p) return;
+    $('progress-to').textContent = p.to === 'parent' ? 'goes to the parent' : 'goes to the member';
+    $('progress-text').style.display = p.canText ? '' : 'none';
+    resetArmed($('progress-text'), 'Text it');
+  }
+  $('progress-copy').addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(progressUrl);
+      toast('Link copied');
+    } catch {
+      window.prompt('Copy this link', progressUrl);
+    }
+  });
+  $('progress-text').addEventListener('click', async () => {
+    if (!picking || !armed($('progress-text'), 'Text it', 'Confirm text')) return;
+    resetArmed($('progress-text'), 'Text it');
+    try {
+      const r = await post('/api/staff/progress-link', { contactId: picking.m.id });
+      toast(r.ok ? `Sent to ${r.to === 'parent' ? 'the parent' : picking.first}` : `Could not send: ${r.reason}`);
+    } catch (e) {
+      toast(`Could not send: ${e.message}`);
+    }
+  });
+
   // Belt and stripe controls on the member screen (§15.4). Hidden when belts
   // are off or migration 006 is pending; the stripe button follows §15.2.
   function renderRankForm(d) {
@@ -1134,6 +1293,7 @@
       else if (t.dataset.tab === 'stripes') { showView('stripes'); await loadStripes(); }
       else if (t.dataset.tab === 'away') { showView('away'); await loadAway(); }
       else if (t.dataset.tab === 'trends') { showView('trends'); await loadTrends(); }
+      else if (t.dataset.tab === 'plan') { showView('plan'); planWeek = null; await loadPlan(); }
       else if (t.dataset.tab === 'tab') { showView('tabview'); await loadTab(); }
       else { showView('members'); $('member-search').focus(); }
     });

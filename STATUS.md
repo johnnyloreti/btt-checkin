@@ -212,6 +212,13 @@ Three things from the BJJLink review, all staff page only.
 - **Migration:** `src/db/migrations/006_belts.sql`, once. The deploy survives either order; until it runs, rank is hidden and `/health` says so.
 - **GHL:** the contact field `payer_contact_id` now exists (created 2026-11-19, id `HZGvoCj68LOGxlmrCE2Z`). 23 members are linked to a parent (2026-11-19). From the next roster sync, a linked kid's waiver reminder goes to the parent. A few kids are still unlinked, waiting on Johnny to name the parent. `/health` shows the count under `payerLinks`.
 
+## Progress page and lesson notes, 2026-11-19
+
+- **Progress page (§15.7).** A member, or a kid's parent, opens `/me?t=...` on their phone: class count, belt and stripes, this week, last 30 days, weeks in a row, next milestone, last ten classes. One link per contact; a parent's link shows all their linked kids. On the staff member screen: "Progress page", with Copy link and "Text it".
+- **Your GHL step:** publish a workflow "Check-In: Progress link": trigger Contact Changed on `progress_link`, If/Else "has value", then an SMS with `{{contact.progress_link}}`, re-entry on. The field exists already (id `ZChoWDYiPHRv90qruqmg`). Until the workflow is live, "Text it" sends nothing; Copy link works.
+- **Lesson notes and the Plan tab (§15.8).** A plan per program per week and a note per class. Tonight shows the first line; the class roster has both boxes; the Plan tab lays out a week.
+- **Migration:** `src/db/migrations/007_lessons.sql`, once. The deploy survives either order; until it runs the lesson boxes are hidden and `/health` says so.
+
 ## Still open after go-live
 
 - Rotate `STAFF_PIN`; the first one was pasted into a chat.

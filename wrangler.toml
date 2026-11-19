@@ -39,6 +39,16 @@ BELTS_ADULT = "white,blue,purple,brown,black"
 # Away tab. "0" turns the list off.
 AWAY_DAYS = "14"
 
+# Progress page (§15.7). A member, or a kid's parent, opens it from a texted
+# link. PROGRESS_PAGE "off" removes the page. PROGRESS_FIELD is the GHL contact
+# field the link is written to so a workflow can text it; blank leaves staff
+# with Copy link only.
+PROGRESS_PAGE = "on"
+PROGRESS_FIELD = "progress_link"
+
+# Lesson notes and week plans (§15.8). "off" hides them.
+LESSON_NOTES = "on"
+
 # Drink tab (§15.3). Keys into tab-items.json; empty TAB_ITEMS turns the tab
 # off. TAB_PROGRAMS: a member buys only if every program they hold is listed
 # here (adults only in Phase 1; a kid in an adult class is excluded until 1b).

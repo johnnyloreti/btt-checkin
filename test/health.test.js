@@ -8,7 +8,11 @@ import { resetSchemaCaps } from '../src/schema-caps.js';
 const schedule = loadSchedule(readRepoFile('schedule.json'));
 
 // The waiver column check is cached per isolate; each fake database re-asks.
-const migrated = { 'pragma_table_info': [{ name: 'waiver' }] };
+const migrated = {
+  'pragma_table_info': [{ name: 'waiver' }],
+  // Migration 007 has run: both lesson tables are there (§15.8).
+  "IN ('lesson_plans', 'class_notes')": [{ name: 'lesson_plans' }, { name: 'class_notes' }],
+};
 const fake = (opts = {}) => {
   resetSchemaCaps();
   return fakeD1({ ...opts, rows: { ...migrated, ...(opts.rows || {}) } });

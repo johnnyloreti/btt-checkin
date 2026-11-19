@@ -16,6 +16,7 @@ let promotionsTable = UNKNOWN;
 let tabTables = UNKNOWN;
 let payerColumn = UNKNOWN;
 let beltColumns = UNKNOWN;
+let lessonTables = UNKNOWN;
 
 /** The seven tables migration 004 creates (§15.3). All or nothing. */
 export const TAB_TABLES = ['purchase_pins', 'pin_setup_tokens', 'pin_failures', 'purchases', 'closeouts', 'closeout_payers', 'tab_flags'];
@@ -93,8 +94,26 @@ export async function hasBeltColumns(env) {
   return beltColumns;
 }
 
+/** The two tables migration 007 creates (§15.8). All or nothing. */
+export const LESSON_TABLES = ['lesson_plans', 'class_notes'];
+
+/** True when both lesson tables exist (migration 007). Cached per isolate. */
+export async function hasLessonTables(env) {
+  if (lessonTables !== UNKNOWN) return lessonTables;
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('lesson_plans', 'class_notes')",
+    ).all();
+    lessonTables = results.length === LESSON_TABLES.length;
+  } catch {
+    lessonTables = false;
+  }
+  return lessonTables;
+}
+
 /** Test hook, and a way to re-check after a migration without a redeploy. */
 export function resetSchemaCaps() {
+  lessonTables = UNKNOWN;
   beltColumns = UNKNOWN;
   payerColumn = UNKNOWN;
   waiverColumn = UNKNOWN;

@@ -16,6 +16,7 @@ import { loadSchedule } from '../../src/schedule.js';
 import { loadTabItems } from '../../src/tab.js';
 import { recordPurchase } from '../../src/purchases.js';
 import { tabConfig } from '../../src/tab.js';
+import { progressToken } from '../../src/progress.js';
 import { memoryD1 } from '../d1.js';
 import { CONTACTS } from '../fixtures/contacts.js';
 
@@ -29,9 +30,9 @@ mkdirSync(OUT, { recursive: true });
 const schedule = loadSchedule(readFileSync(join(ROOT, 'schedule.json'), 'utf8'));
 const tabItems = loadTabItems(readFileSync(join(ROOT, 'tab-items.json'), 'utf8'));
 const NOW = new Date('2026-09-05T15:05:00Z'); // Sat 11:05 ET
-const env = { MEMBER_TAGS: 'founding-member', MEMBER_TAG_PREFIXES: 'foundations-', STAFF_PIN: '1234', ID_SALT: 'browser-test-salt', TZ: 'America/New_York', STRIPE_CLASSES: '7', STRIPE_PROGRAMS: 'kids-3-5,kids-6-9,kids-10-14', TAB_ITEMS: 'water,hydration', TAB_PROGRAMS: 'adult', PIN_PEPPER: 'a-long-pepper-for-the-browser', PUBLIC_ORIGIN: 'https://checkin.bttbridgewater.com', DB: memoryD1() };
+const env = { MEMBER_TAGS: 'founding-member', MEMBER_TAG_PREFIXES: 'foundations-', STAFF_PIN: '1234', ID_SALT: 'browser-test-salt', TZ: 'America/New_York', STRIPE_CLASSES: '7', STRIPE_PROGRAMS: 'kids-3-5,kids-6-9,kids-10-14', TAB_ITEMS: 'water,hydration', TAB_PROGRAMS: 'adult', PIN_PEPPER: 'a-long-pepper-for-the-browser', PUBLIC_ORIGIN: 'https://checkin.bttbridgewater.com', PROGRESS_FIELD: 'progress_link', DB: memoryD1() };
 await syncRoster(env, schedule, { fetchContacts: async () => ({ contacts: CONTACTS, pages: 1 }), now: new Date(NOW.getTime() - 3600_000) });
-const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8' };
+const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.png': 'image/png' };
 env.ASSETS = {
   fetch: async (req) => {
     const p = join(ROOT, 'public', new URL(req.url).pathname);
@@ -51,7 +52,13 @@ const fakeGhl = {
   activateSchedule: async (e, id, auto) => { ghlState.active[id] = { _id: id, status: 'active', autoPayment: auto }; return {}; },
   listInvoices: async (e, id) => ghlState.invoices[id] || [],
 };
-const app = createApp(schedule, { runRosterSync: async () => ({ outcome: 'ok', members: 7 }), ghl: fakeGhl, now: () => NOW }, { tabItems });
+const progressLinks = [];
+const app = createApp(schedule, {
+  runRosterSync: async () => ({ outcome: 'ok', members: 7 }),
+  ghl: fakeGhl,
+  progressLink: async (e, contactId, url) => { progressLinks.push([contactId, url]); return { ok: true }; },
+  now: () => NOW,
+}, { tabItems });
 
 // Bridge node http → the Worker's fetch handler.
 const server = http.createServer(async (req, res) => {
@@ -85,7 +92,7 @@ async function step(name, fn) {
     // selector it gave up on, which makes a timeout here impossible to read.
     const lines = e.message.split('\n');
     const waiting = lines.find((l) => /waiting for|locator\(/.test(l));
-    console.log(`FAIL ${name}\n     ${lines[0]}${waiting ? `\n     ${waiting.trim()}` : ''}`);
+    console.log(`FAIL ${name}\n     ${lines.slice(0, 4).join(' / ')}${waiting ? `\n     ${waiting.trim()}` : ''}`);
   }
 }
 
@@ -318,6 +325,121 @@ await step('belts: record a rank on the member screen, add a stripe, and see it 
   await page.waitForSelector('#tonight.active');
   await page.click('#next-day');
   await page.waitForFunction(() => /No classes this day/.test(document.getElementById('tonight-list').textContent));
+});
+
+await step('lessons: a note for the class and a plan for the week, shown on Tonight and laid out on Plan', async () => {
+  // The date bar is on Sunday; step back to Saturday Sep 5.
+  await page.click('.tab[data-tab="tonight"]');
+  await page.click('#prev-day');
+  await page.waitForSelector('#tonight-list .row[data-name="Kids 6-9"]');
+  assert.equal(await page.locator('#plan-nav').isVisible(), true);
+  assert.equal(await page.locator('#tonight-list .lesson').count(), 0, 'nothing planned yet');
+  await page.click('#tonight-list .row[data-name="Kids 6-9"]');
+  await page.waitForSelector('#class-lesson .lessonbox');
+  const boxes = page.locator('#class-lesson .lessonbox');
+  assert.equal(await boxes.count(), 2);
+  assert.match(await boxes.nth(0).textContent(), /This class.*No note for this class/);
+  assert.match(await boxes.nth(1).textContent(), /This week, Kids 6-9.*No plan for the week yet/);
+
+  // The week's plan first.
+  await boxes.nth(1).locator('.edit').click();
+  await boxes.nth(1).locator('textarea').fill('Closed guard.\nScissor sweep, then hip bump.');
+  await boxes.nth(1).locator('.save').click();
+  await page.waitForFunction(() => /Scissor sweep/.test(document.querySelectorAll('#class-lesson .lessonbox')[1].querySelector('.body')?.textContent || ''));
+  // Cancel leaves a box as it was.
+  await boxes.nth(0).locator('.edit').click();
+  await boxes.nth(0).locator('textarea').fill('typed by mistake');
+  await boxes.nth(0).locator('button:has-text("Cancel")').click();
+  assert.match(await boxes.nth(0).textContent(), /No note for this class/);
+  // Then a note for this class, with markup that must stay text.
+  await boxes.nth(0).locator('.edit').click();
+  await boxes.nth(0).locator('textarea').fill('Belt test prep <b>today</b>');
+  await boxes.nth(0).locator('.save').click();
+  await page.waitForFunction(() => /Belt test prep/.test(document.querySelector('#class-lesson .lessonbox .body')?.textContent || ''));
+  assert.equal(await boxes.nth(0).locator('.body b').count(), 0, 'rendered as text, not markup');
+  assert.equal(await boxes.nth(0).locator('.body').textContent(), 'Belt test prep <b>today</b>');
+  await page.screenshot({ path: join(OUT, 'staff-class-lesson.png') });
+  const stored = env.DB.raw.prepare('SELECT class_start_local, class_name, body FROM class_notes').all();
+  assert.deepEqual(stored.map((r) => [r.class_start_local, r.class_name, r.body]), [['2026-09-05T11:00', 'Kids 6-9', 'Belt test prep <b>today</b>']]);
+  assert.deepEqual(env.DB.raw.prepare('SELECT week_start, program FROM lesson_plans').all().map((r) => [r.week_start, r.program]), [['2026-08-31', 'kids-6-9']]);
+
+  // Tonight shows the first line: the class note where there is one.
+  await page.click('#class-back');
+  await page.waitForSelector('#tonight-list .lesson');
+  assert.equal(await page.locator('#tonight-list .row[data-name="Kids 6-9"] .lesson').textContent(), 'Belt test prep <b>today</b>');
+  assert.equal(await page.locator('#tonight-list .lesson').count(), 1);
+  await page.screenshot({ path: join(OUT, 'staff-tonight-lesson.png') });
+
+  // Plan lays the week out by program.
+  await page.click('.tab[data-tab="plan"]');
+  await page.waitForSelector('#plan-box .lessonbox');
+  assert.equal(await page.locator('#plan-title').textContent(), 'Week of Aug 31');
+  assert.deepEqual(await page.locator('#plan-box .planprog').allTextContents(), ['Kids 3-5', 'Kids 6-9', 'Kids 10-14', 'Adult']);
+  const text = await page.locator('#plan-box').textContent();
+  assert.match(text, /Scissor sweep, then hip bump/);
+  assert.match(text, /Sat, Sep 5, 11:00 AM.*Belt test prep/);
+  assert.match(text, /Wed, Sep 2, 6:15 PM, Adult No-Gi/, 'a class named differently from its program says so');
+  await page.screenshot({ path: join(OUT, 'staff-plan.png'), fullPage: true });
+  // Next week is blank and its own.
+  await page.click('#plan-next');
+  await page.waitForFunction(() => document.getElementById('plan-title').textContent === 'Week of Sep 7');
+  assert.doesNotMatch(await page.locator('#plan-box').textContent(), /Scissor sweep|Belt test prep/);
+  const wide = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
+  assert.equal(wide, false, 'no horizontal scroll');
+
+  // Put the date bar back on Sunday for the steps that follow.
+  await page.click('.tab[data-tab="tonight"]');
+  await page.waitForSelector('#tonight-list .row');
+  await page.click('#next-day');
+  await page.waitForFunction(() => /No classes this day/.test(document.getElementById('tonight-list').textContent));
+});
+
+await step('progress page: staff copy or text the link; the page shows the member on a phone', async () => {
+  await page.click('.tab[data-tab="members"]');
+  await page.fill('#member-search', 'jack');
+  await page.waitForSelector('#member-tiles .tile');
+  await page.click('#member-tiles .tile:has-text("Jack Silva")');
+  await page.waitForSelector('#member.active');
+  assert.equal(await page.locator('#member-progress').isVisible(), true);
+  assert.equal(await page.locator('#progress-to').textContent(), 'goes to the member');
+  await page.click('#progress-text');
+  assert.equal(await page.locator('#progress-text').textContent(), 'Confirm text');
+  assert.equal(progressLinks.length, 0, 'one tap only arms');
+  await page.click('#progress-text');
+  await page.waitForFunction(() => /Sent to Jack/.test(document.getElementById('toast').textContent));
+  const token = await progressToken('c_jack', env.ID_SALT);
+  assert.deepEqual(progressLinks, [['c_jack', `https://checkin.bttbridgewater.com/me?t=${token}`]]);
+
+  // The page itself, on a phone, with no staff cookie.
+  const phoneCtx = await browser.newContext({ ...devices['iPhone 13'], deviceScaleFactor: 1 });
+  const me = await phoneCtx.newPage();
+  const meErrors = [];
+  me.on('pageerror', (e) => meErrors.push(String(e)));
+  await me.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
+  await me.goto(`${base}/me?t=${token}`);
+  await me.waitForSelector('.card');
+  assert.equal(await me.locator('.card').count(), 1);
+  assert.equal(await me.locator('.who h1').textContent(), 'Jack Silva');
+  assert.equal(await me.locator('.who .prog').textContent(), 'Kids 6-9');
+  assert.match(await me.locator('.count').textContent(), /^Class #7/);
+  assert.match(await me.locator('.rank .label').textContent(), /Grey belt, 3 stripes/);
+  assert.equal(await me.locator('.belt .bar i').count(), 3, 'three stripes drawn on the belt');
+  assert.match(await me.locator('.next').textContent(), /3 classes to Class #10/);
+  assert.equal(await me.locator('.recent li').count(), 7);
+  assert.match(await me.locator('.recent li').first().textContent(), /Sat, Aug 8.*Kids 6-9.*4:30 PM/);
+  const text = await me.evaluate(() => document.body.innerText);
+  assert.doesNotMatch(text, /!|—|@|billing|balance|waiver|\$/i, 'copy rules, and nothing about money');
+  const meWide = await me.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
+  assert.equal(meWide, false, 'no horizontal scroll on a phone');
+  assert.equal(await me.title(), 'Jack at BTT Bridgewater');
+  await me.screenshot({ path: join(OUT, 'me-progress.png'), fullPage: true });
+
+  // A link that matches nobody says so, and nothing else.
+  await me.goto(`${base}/me?t=${'0'.repeat(32)}`);
+  await me.waitForFunction(() => /could not find this page/.test(document.getElementById('state').textContent));
+  assert.equal(await me.locator('.card').count(), 0);
+  assert.deepEqual(meErrors, []);
+  await phoneCtx.close();
 });
 
 await step('add a class from the member screen: pick a day, see only their classes', async () => {

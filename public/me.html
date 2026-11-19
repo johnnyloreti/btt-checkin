@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#09090a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="BTT Progress">
+<title>Your progress</title>
+<link rel="apple-touch-icon" href="/logo.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root { --bg: #09090a; --bone: #f4f1e9; --gold: #e7c24c; --muted: rgba(244,241,233,.55); --line: rgba(244,241,233,.14); --tile: rgba(244,241,233,.06); --display: 'Oswald', 'Arial Narrow', sans-serif; --body: 'Inter', -apple-system, 'Helvetica Neue', Arial, sans-serif; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--bone); font-family: var(--body); -webkit-text-size-adjust: 100%; }
+  body { padding: 22px 16px 40px; padding-top: max(22px, env(safe-area-inset-top)); }
+  main { max-width: 520px; margin: 0 auto; }
+  .top { text-align: center; margin-bottom: 22px; }
+  .top img { width: 84px; height: 84px; display: block; margin: 0 auto 10px; }
+  .brand { font-family: var(--display); font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); font-size: 13px; margin: 0; }
+  .state { text-align: center; color: var(--muted); font-size: 18px; padding: 40px 10px; }
+  .card { background: var(--tile); border: 1px solid var(--line); border-radius: 18px; padding: 20px 18px; margin-bottom: 16px; }
+  .who { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .who h1 { font-family: var(--display); font-weight: 500; font-size: 30px; margin: 0; overflow-wrap: anywhere; }
+  .who .prog { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--gold); white-space: nowrap; }
+  .count { font-family: var(--display); font-weight: 600; font-size: 64px; line-height: 1; color: var(--gold); margin: 18px 0 2px; font-variant-numeric: tabular-nums; }
+  .count small { display: block; font-family: var(--body); font-weight: 500; font-size: 14px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-top: 8px; }
+  .rank { margin-top: 18px; }
+  .belt { position: relative; height: 26px; border-radius: 5px; border: 1px solid rgba(244,241,233,.28); overflow: hidden; }
+  .belt .mid { position: absolute; left: 0; right: 0; top: 50%; height: 8px; margin-top: -4px; }
+  .belt .bar { position: absolute; top: 0; bottom: 0; right: 14%; width: 92px; display: flex; align-items: center; justify-content: center; gap: 7px; }
+  .belt .bar i { display: block; width: 6px; height: 100%; background: #f4f1e9; }
+  .rank .label { font-size: 16px; font-weight: 600; margin-top: 8px; }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 18px; }
+  .stat { border: 1px solid var(--line); border-radius: 12px; padding: 12px 8px; text-align: center; }
+  .stat b { display: block; font-family: var(--display); font-weight: 600; font-size: 28px; font-variant-numeric: tabular-nums; }
+  .stat span { display: block; font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); margin-top: 4px; }
+  .next { margin-top: 16px; font-size: 16px; }
+  .next .track { height: 8px; border-radius: 999px; background: rgba(244,241,233,.12); overflow: hidden; margin-top: 8px; }
+  .next .fill { height: 100%; background: var(--gold); border-radius: 999px; }
+  h2 { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; margin: 22px 0 6px; }
+  .recent { list-style: none; margin: 0; padding: 0; }
+  .recent li { display: flex; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 16px; }
+  .recent li:last-child { border-bottom: none; }
+  .recent .d { color: var(--muted); min-width: 96px; font-variant-numeric: tabular-nums; }
+  .recent .c { flex: 1; }
+  .recent .t { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .none { color: var(--muted); font-size: 16px; padding: 6px 0; }
+  .foot { text-align: center; color: var(--muted); font-size: 14px; line-height: 1.5; margin-top: 24px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="top">
+    <img src="/logo.png" alt="">
+    <p class="brand">Brazilian Top Team Bridgewater</p>
+  </div>
+  <div id="state" class="state">One moment</div>
+  <div id="cards"></div>
+  <p id="foot" class="foot" hidden>Add this page to your home screen to check back any time.<br>Questions? Ask at the desk.</p>
+</main>
+<script>
+  const $ = (id) => document.getElementById(id);
+  function el(tag, cls, text) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+  function fmtDate(ymd) {
+    const [y, m, d] = ymd.split('-').map(Number);
+    return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('en-US', { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric' });
+  }
+  function fmtTime(hm) {
+    const [h, m] = hm.split(':').map(Number);
+    return `${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
+  }
+  const plural = (n, word) => `${n} ${word}${n === 1 ? '' : word.endsWith('s') ? 'es' : 's'}`;
+
+  // Belt colours. A two-part belt ("grey-white") is the first colour with a
+  // stripe of the second along the middle. An unknown belt draws plain.
+  const COLOURS = { white: '#f4f1e9', grey: '#8f9296', yellow: '#e9c838', orange: '#e2792b', green: '#2f8f4e', blue: '#2b62c9', purple: '#6c41b5', brown: '#6d4426', black: '#141414' };
+  function beltGraphic(rank) {
+    const [base, mid] = String(rank.belt).split('-');
+    const belt = el('div', 'belt');
+    belt.style.background = COLOURS[base] || 'rgba(244,241,233,.18)';
+    if (mid && COLOURS[mid]) {
+      const stripe = el('div', 'mid');
+      stripe.style.background = COLOURS[mid];
+      belt.appendChild(stripe);
+    }
+    // The rank bar: black, or red on a black belt, with the stripes on it.
+    const bar = el('div', 'bar');
+    bar.style.background = base === 'black' ? '#b3261e' : '#141414';
+    for (let i = 0; i < Math.min(rank.stripes, 6); i += 1) bar.appendChild(el('i'));
+    belt.appendChild(bar);
+    return belt;
+  }
+
+  function card(p) {
+    const c = el('section', 'card');
+    const who = el('div', 'who');
+    who.append(el('h1', '', `${p.first} ${p.last}`.trim()), el('span', 'prog', p.programLabels.join(' / ')));
+    c.appendChild(who);
+
+    const count = el('div', 'count', p.lifetime > 0 ? `Class #${p.lifetime}` : 'Welcome');
+    count.appendChild(el('small', '', p.lifetime > 0 ? 'Classes so far' : 'Your first class starts the count'));
+    c.appendChild(count);
+
+    if (p.rank) {
+      const rank = el('div', 'rank');
+      rank.append(beltGraphic(p.rank), el('div', 'label', `${p.rank.label}${p.rank.stripes ? `, ${plural(p.rank.stripes, 'stripe')}` : ''}`));
+      c.appendChild(rank);
+    }
+
+    const stats = el('div', 'stats');
+    const stat = (n, label) => { const s = el('div', 'stat'); s.append(el('b', '', String(n)), el('span', '', label)); stats.appendChild(s); };
+    stat(p.week, 'This week');
+    stat(p.last30, 'Last 30 days');
+    stat(p.streakWeeks, p.streakWeeks === 1 ? 'Week in a row' : 'Weeks in a row');
+    c.appendChild(stats);
+
+    if (p.nextMilestone && p.lifetime > 0) {
+      const next = el('div', 'next', `${plural(p.nextMilestone.toGo, 'class')} to Class #${p.nextMilestone.at}`);
+      const track = el('div', 'track');
+      const fill = el('div', 'fill');
+      fill.style.width = `${Math.round((p.lifetime / p.nextMilestone.at) * 100)}%`;
+      track.appendChild(fill);
+      next.appendChild(track);
+      c.appendChild(next);
+    }
+
+    c.appendChild(el('h2', '', 'Recent classes'));
+    if (p.recent.length === 0) {
+      c.appendChild(el('div', 'none', 'No classes yet. See you on the mat.'));
+    } else {
+      const list = el('ul', 'recent');
+      for (const r of p.recent) {
+        const li = el('li');
+        li.append(el('span', 'd', fmtDate(r.date)), el('span', 'c', r.className), el('span', 't', r.start ? fmtTime(r.start) : ''));
+        list.appendChild(li);
+      }
+      c.appendChild(list);
+    }
+    return c;
+  }
+
+  async function start() {
+    const token = new URLSearchParams(location.search).get('t') || '';
+    let data = null;
+    try {
+      const res = await fetch(`/api/progress?t=${encodeURIComponent(token)}`, { cache: 'no-store' });
+      data = res.ok ? await res.json() : { ok: false, gone: res.status === 404 };
+    } catch {
+      data = null;
+    }
+    if (!data) { $('state').textContent = 'We could not load this page. Check your connection and try again.'; return; }
+    if (!data.ok) { $('state').textContent = 'We could not find this page. Ask at the desk for a new link.'; return; }
+    $('state').hidden = true;
+    for (const p of data.people) $('cards').appendChild(card(p));
+    document.title = data.people.length === 1 ? `${data.people[0].first} at BTT Bridgewater` : 'BTT Bridgewater progress';
+    $('foot').hidden = false;
+  }
+  start();
+</script>
+</body>
+</html>
