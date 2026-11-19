@@ -227,9 +227,13 @@
     }
     $('drink-mode').hidden = drinkMode || !tabAvailable;
   }
+  let lastTouch = Date.now();
   function bumpIdle() {
+    lastTouch = Date.now();
     clearTimeout(idleTimer);
-    idleTimer = setTimeout(goHome, IDLE_MS);
+    // A minute with nobody at the screen: back to home, and if a new version
+    // has been deployed, this is the moment to pick it up.
+    idleTimer = setTimeout(() => { goHome(); maybeUpdate(); }, IDLE_MS);
   }
   for (const ev of ['touchstart', 'pointerdown', 'keydown', 'input']) document.addEventListener(ev, bumpIdle, { passive: true });
   bumpIdle();
@@ -654,6 +658,57 @@
     $('status').textContent = n > 0 ? `${n} check-in${n === 1 ? '' : 's'} waiting to sync` : '';
   }
 
+  // ---------- picking up a new version on its own ----------
+  // After a deploy the iPad kept running the page it had loaded until
+  // someone reloaded it by hand. Now the page looks at what the server is
+  // serving every ten minutes, and when that is no longer what it loaded,
+  // reloads itself the next time nobody is using it.
+  //
+  // It only ever reloads when all of these hold, because a reload that fails
+  // leaves a kiosk showing a browser error with nobody there to fix it:
+  //   - the answer it just got really is the kiosk page (a wifi sign-in page
+  //     answers 200 too, and must never count as "a new version");
+  //   - nobody has touched the screen for a minute, it is on the home
+  //     screen, nothing is typed, and it is not in drink mode;
+  //   - it has not already reloaded in the last ten minutes.
+  // Offline, the check fails quietly and the page carries on as it is.
+  // Check-ins waiting to sync live in localStorage and survive the reload.
+  const VERSION_CHECK_MS = 10 * 60_000;
+  const RELOAD_KEY = 'btt.checkin.reloadedAt';
+  let loadedVersion = null;   // what the server was serving when this page loaded
+  let updateWaiting = false;
+  async function servedVersion() {
+    const get = async (path, mark) => {
+      const res = await fetch(path, { cache: 'no-store' });
+      if (!res.ok) throw new Error(String(res.status));
+      const text = await res.text();
+      if (!text.includes(mark)) throw new Error('not ours');
+      return text;
+    };
+    const [page, lib] = await Promise.all([get('/', 'btt.checkin.queue'), get('/search.js', 'export')]);
+    return `${page}\n${lib}`;
+  }
+  async function checkVersion() {
+    try {
+      const now = await servedVersion();
+      if (loadedVersion === null) loadedVersion = now;
+      updateWaiting = now !== loadedVersion;
+    } catch {
+      return; // offline, or not our page: say nothing and stay as we are
+    }
+    maybeUpdate();
+  }
+  function maybeUpdate() {
+    if (!updateWaiting || document.hidden) return;
+    if (Date.now() - lastTouch < IDLE_MS) return;
+    if (!screens.home.classList.contains('active') || drinkMode || input.value !== '') return;
+    let last = 0;
+    try { last = Number(sessionStorage.getItem(RELOAD_KEY)) || 0; } catch { /* no storage: the checks above are enough */ }
+    if (Date.now() - last < VERSION_CHECK_MS) return;
+    try { sessionStorage.setItem(RELOAD_KEY, String(Date.now())); } catch { /* carry on */ }
+    location.reload();
+  }
+
   // ---------- boot ----------
   roster = load(ROSTER_KEY, []);
   loadRoster();
@@ -665,6 +720,8 @@
   setInterval(refreshTabAvailable, ROSTER_REFRESH_MS);
   setInterval(refreshCurrentClass, CLASS_REFRESH_MS);
   setInterval(drainQueue, RETRY_MS);
+  checkVersion();
+  setInterval(checkVersion, VERSION_CHECK_MS);
   window.addEventListener('online', drainQueue);
   // iOS suspends timers while Safari is backgrounded or the iPad sleeps, so
   // the 30 s retry above stops running. Drain on the way back to the front.

@@ -106,6 +106,10 @@ const server = http.createServer((req, res) => {
   const p = join(ROOT, 'public', file);
   if (!existsSync(p)) { res.writeHead(404); return res.end('not found'); }
   res.writeHead(200, { 'content-type': TYPES[extname(p)] || 'application/octet-stream' });
+  // For the self-update step: a wifi sign-in page in place of the kiosk, or
+  // a new deploy of it.
+  if (file === '/index.html' && state.portal) return res.end('<!doctype html><title>Sign in to wifi</title><p>Accept the terms to continue.</p>');
+  if (file === '/index.html' && state.deployed) return res.end(`${readFileSync(p)}<!-- deploy ${state.deployed} -->`);
   res.end(readFileSync(p));
 });
 
@@ -495,6 +499,66 @@ await step('offline: failed POST still shows success and queues with its origina
   assert.equal(state.checkins.at(-1).clientTs, ts, 'original tap time retried');
   assert.equal(await page.locator('#status').textContent(), '');
 });
+await step('a new deploy is picked up on its own, only when nobody is at the screen', async () => {
+  // A fresh page with a clock we can wind: the checks run every ten minutes
+  // and wait for a minute of quiet.
+  const ctx = await browser.newContext({ viewport: { width: 820, height: 1180 } });
+  const kiosk = await ctx.newPage();
+  await kiosk.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
+  await kiosk.clock.install();
+  let loads = 0;
+  kiosk.on('load', () => { loads += 1; });
+  await kiosk.goto(`${base}/`);
+  await kiosk.waitForSelector('#name-input');
+  await kiosk.waitForTimeout(300); // the page's first look at what is being served
+  assert.equal(loads, 1);
+  const settle = async (ms) => { await kiosk.clock.runFor(ms); await kiosk.waitForTimeout(400); };
+
+  // Nothing new: ten quiet minutes later it is still the same page.
+  await settle(11 * 60_000);
+  assert.equal(loads, 1, 'no reload when nothing changed');
+
+  // The wifi drops to a sign-in page. That is not a new version.
+  state.portal = true;
+  await settle(11 * 60_000);
+  assert.equal(loads, 1, 'a sign-in page must never trigger a reload');
+  state.portal = false;
+
+  // A deploy lands, and the next look (at 30 minutes; we are at 22) comes
+  // while someone is typing a name: it waits.
+  state.deployed = 'one';
+  await settle(8 * 60_000 - 20_000);
+  await kiosk.fill('#name-input', 'ja');
+  await settle(40_000);
+  assert.equal(loads, 1, 'not while someone is at the screen');
+  assert.equal(await kiosk.locator('#name-input').inputValue(), 'ja');
+  await kiosk.fill('#name-input', 'jac');
+
+  // They walk away. A minute later the screen goes home and the page reloads.
+  await settle(61_000);
+  await kiosk.waitForSelector('#name-input');
+  assert.equal(loads, 2, 'reloaded once the screen was quiet');
+  assert.equal(await kiosk.locator('#name-input').inputValue(), '');
+
+  // The new page is now the one loaded: it does not reload again.
+  await settle(25 * 60_000);
+  assert.equal(loads, 2, 'one reload per deploy');
+
+  // Offline: the check fails quietly, the page stays, and a queued check-in is still there after the next update.
+  await ctx.setOffline(true);
+  await settle(11 * 60_000);
+  assert.equal(loads, 2, 'offline changes nothing');
+  await ctx.setOffline(false);
+  await kiosk.evaluate(() => localStorage.setItem('btt.checkin.queue', JSON.stringify([{ contactId: 'x', classStartLocal: '2026-09-05T11:00', className: 'Kids 6-9', clientTs: '2026-09-05T15:00:00.000Z' }])));
+  state.deployed = 'two';
+  await settle(11 * 60_000);
+  await settle(61_000);
+  await kiosk.waitForSelector('#name-input');
+  assert.equal(loads, 3);
+  state.deployed = null;
+  await ctx.close();
+});
+
 await step('page text never shows an email, phone, billing, or status', async () => {
   const text = await page.evaluate(() => document.body.innerText);
   assert.doesNotMatch(text, /@|billing|inactive|balance/i);
