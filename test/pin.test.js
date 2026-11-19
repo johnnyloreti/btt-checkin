@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   hashPin, constantTimeEqual, verifyPin, createSetupToken, readSetupToken, completeSetup, clearLockout, pinStatus, pinActivity,
-  writePinLink, requirePepper, LOCK_AFTER, LOCK_MS, LOCK_WINDOW_MS, TOKEN_TTL_MS, LINK_MIN_GAP_MS,
+  isWeakPin, writePinLink, requirePepper, LOCK_AFTER, LOCK_MS, LOCK_WINDOW_MS, TOKEN_TTL_MS, LINK_MIN_GAP_MS,
 } from '../src/pin.js';
 import { requiredFieldKeys } from '../src/fields.js';
 import { FIELD_KEYS } from '../src/rollup.js';
@@ -30,13 +30,13 @@ const envFor = (DB, extra = {}) => ({ PIN_PEPPER: PEPPER, DB, ...extra });
 
 test('hashPin is deterministic, depends on the pepper, salt, contact and pin, and needs a real pepper', async () => {
   const env = envFor(null);
-  const a = await hashPin(env, 'c_x', 'salt1', '1234');
-  assert.equal(a, await hashPin(env, 'c_x', 'salt1', '1234'));
+  const a = await hashPin(env, 'c_x', 'salt1', '4821');
+  assert.equal(a, await hashPin(env, 'c_x', 'salt1', '4821'));
   assert.match(a, /^[0-9a-f]{64}$/);
-  assert.notEqual(a, await hashPin(env, 'c_x', 'salt2', '1234'));
-  assert.notEqual(a, await hashPin(env, 'c_y', 'salt1', '1234'));
+  assert.notEqual(a, await hashPin(env, 'c_x', 'salt2', '4821'));
+  assert.notEqual(a, await hashPin(env, 'c_y', 'salt1', '4821'));
   assert.notEqual(a, await hashPin(env, 'c_x', 'salt1', '1235'));
-  assert.notEqual(a, await hashPin({ PIN_PEPPER: 'a-different-long-pepper' }, 'c_x', 'salt1', '1234'));
+  assert.notEqual(a, await hashPin({ PIN_PEPPER: 'a-different-long-pepper' }, 'c_x', 'salt1', '4821'));
   for (const bad of [undefined, '', 'short']) assert.throws(() => requirePepper({ PIN_PEPPER: bad }), /PIN_PEPPER/);
 });
 
@@ -48,12 +48,36 @@ test('constantTimeEqual', () => {
   assert.equal(constantTimeEqual(null, undefined), true);
 });
 
-async function withPin(pin = '1234') {
+async function withPin(pin = '4821') {
   const env = envFor(memoryD1());
   const t = await createSetupToken(env, 'c_x', 'staff', NOW);
   assert.equal((await completeSetup(env, t.token, pin, NOW)).ok, true);
   return env;
 }
+
+test('weak PINs: one digit four times, or four in a row either way, and nothing else', () => {
+  for (const p of ['0000', '1111', '9999', '0123', '1234', '6789', '9876', '3210', '4321']) assert.equal(isWeakPin(p), true, p);
+  for (const p of ['4821', '1212', '1235', '2468', '0987', '1122', '7007', '12', '', null, '12345']) assert.equal(isWeakPin(p), false, String(p));
+  let n = 0;
+  for (let i = 0; i < 10_000; i += 1) if (isWeakPin(String(i).padStart(4, '0'))) n += 1;
+  assert.equal(n, 24, 'ten repeats, seven runs up, seven runs down');
+});
+
+test('a weak PIN is refused at setup without spending the link, and one set before the rule still works', async () => {
+  const env = envFor(memoryD1());
+  const t = await createSetupToken(env, 'c_x', 'link', NOW);
+  assert.deepEqual(await completeSetup(env, t.token, '1234', NOW), { ok: false, reason: 'weak' });
+  assert.deepEqual(await completeSetup(env, t.token, '0000', NOW), { ok: false, reason: 'weak' });
+  assert.deepEqual(await pinStatus(env, 'c_x', NOW), { hasPin: false, locked: false, lockedUntil: null });
+  assert.equal((await completeSetup(env, t.token, '4821', NOW)).ok, true, 'the same link takes a better PIN');
+  // A bad link says it is a bad link, whatever PIN came with it.
+  assert.deepEqual(await completeSetup(env, 'f'.repeat(64), '1234', NOW), { ok: false, reason: 'invalid' });
+
+  // A member who set 1234 before the rule: the row is as setup wrote it then.
+  env.DB.raw.prepare("INSERT INTO purchase_pins (payer_contact_id, pin_hash, salt, set_at, set_by) VALUES ('c_old', ?, 's', ?, 'link')")
+    .run(await hashPin(env, 'c_old', 's', '1234'), NOW.toISOString());
+  assert.deepEqual(await verifyPin(env, 'c_old', '1234', NOW), { ok: true });
+});
 
 test('setup: token is single use, expires at 30 minutes, and sets the PIN with a fresh salt', async () => {
   const env = envFor(memoryD1());
@@ -73,27 +97,27 @@ test('setup: token is single use, expires at 30 minutes, and sets the PIN with a
   assert.deepEqual(await readSetupToken(env, 'f'.repeat(64), NOW), { ok: false, reason: 'invalid' });
 
   assert.deepEqual(await completeSetup(env, t.token, '12345', NOW), { ok: false, reason: 'bad_format' });
-  assert.deepEqual(await completeSetup(env, t.token, '1234', at(60_000)), { ok: true, contactId: 'c_x' });
+  assert.deepEqual(await completeSetup(env, t.token, '4821', at(60_000)), { ok: true, contactId: 'c_x' });
   const row = env.DB.raw.prepare('SELECT * FROM purchase_pins').get();
   assert.equal(row.set_by, 'link');
   assert.equal(row.set_at, at(60_000).toISOString());
   assert.match(row.salt, /^[0-9a-f]{32}$/);
-  assert.equal(row.pin_hash, await hashPin(env, 'c_x', row.salt, '1234'));
+  assert.equal(row.pin_hash, await hashPin(env, 'c_x', row.salt, '4821'));
   assert.deepEqual(await readSetupToken(env, t.token, at(120_000)), { ok: false, reason: 'used' });
-  assert.deepEqual(await completeSetup(env, t.token, '1234', at(120_000)), { ok: false, reason: 'used' });
+  assert.deepEqual(await completeSetup(env, t.token, '4821', at(120_000)), { ok: false, reason: 'used' });
   assert.deepEqual(await pinStatus(env, 'c_x', NOW), { hasPin: true, locked: false, lockedUntil: null });
 
   // Setting again (a second link) replaces hash and salt and clears any lock.
   env.DB.raw.prepare("UPDATE purchase_pins SET failed_count = 3, locked_until = '2099-01-01T00:00:00.000Z'").run();
   const t2 = await createSetupToken(env, 'c_x', 'staff', at(3600_000));
-  assert.equal((await completeSetup(env, t2.token, '9999', at(3600_000))).ok, true);
+  assert.equal((await completeSetup(env, t2.token, '7007', at(3600_000))).ok, true);
   const row2 = env.DB.raw.prepare('SELECT * FROM purchase_pins').get();
   assert.notEqual(row2.salt, row.salt);
   assert.equal(row2.set_by, 'staff');
   assert.equal(row2.failed_count, 0);
   assert.equal(row2.locked_until, null);
-  assert.equal((await verifyPin(env, 'c_x', '9999', at(3600_000))).ok, true);
-  assert.equal((await verifyPin(env, 'c_x', '1234', at(3600_000))).ok, false);
+  assert.equal((await verifyPin(env, 'c_x', '7007', at(3600_000))).ok, true);
+  assert.equal((await verifyPin(env, 'c_x', '4821', at(3600_000))).ok, false);
 });
 
 test('one kiosk-requested link per member per 10 minutes; staff-opened setup has no gap', async () => {
@@ -110,18 +134,18 @@ test('one kiosk-requested link per member per 10 minutes; staff-opened setup has
 });
 
 test('verifyPin: right, wrong, malformed, and no PIN at all', async () => {
-  const env = await withPin('1234');
-  assert.deepEqual(await verifyPin(env, 'c_x', '1234', NOW), { ok: true });
+  const env = await withPin('4821');
+  assert.deepEqual(await verifyPin(env, 'c_x', '4821', NOW), { ok: true });
   assert.deepEqual(await verifyPin(env, 'c_x', '0000', NOW), { ok: false, reason: 'wrong' });
   assert.deepEqual(await verifyPin(env, 'c_x', '12', NOW), { ok: false, reason: 'bad_format' });
-  assert.deepEqual(await verifyPin(env, 'c_x', 1234, NOW), { ok: true }, 'a number is fine, it reads as four digits');
-  assert.deepEqual(await verifyPin(env, 'c_nobody', '1234', NOW), { ok: false, reason: 'no_pin' });
+  assert.deepEqual(await verifyPin(env, 'c_x', 4821, NOW), { ok: true }, 'a number is fine, it reads as four digits');
+  assert.deepEqual(await verifyPin(env, 'c_nobody', '4821', NOW), { ok: false, reason: 'no_pin' });
   // A malformed PIN is not counted as a failure.
   assert.equal(env.DB.raw.prepare('SELECT COUNT(*) AS n FROM pin_failures').get().n, 1);
 });
 
 test('lockout: the fifth wrong PIN in 15 minutes locks for 15 minutes; a right PIN resets the count', async () => {
-  const env = await withPin('1234');
+  const env = await withPin('4821');
   for (let i = 0; i < LOCK_AFTER - 1; i += 1) {
     assert.deepEqual(await verifyPin(env, 'c_x', '0000', at(i * 1000)), { ok: false, reason: 'wrong' }, `wrong #${i + 1}`);
   }
@@ -129,23 +153,23 @@ test('lockout: the fifth wrong PIN in 15 minutes locks for 15 minutes; a right P
   assert.equal(fifth.reason, 'locked');
   assert.equal(fifth.lockedUntil, at(4000 + LOCK_MS).toISOString());
   // Locked: even the right PIN is refused, and nothing more is counted.
-  const during = await verifyPin(env, 'c_x', '1234', at(5000));
+  const during = await verifyPin(env, 'c_x', '4821', at(5000));
   assert.equal(during.reason, 'locked');
   assert.equal(env.DB.raw.prepare('SELECT COUNT(*) AS n FROM pin_failures').get().n, LOCK_AFTER);
   assert.equal((await pinStatus(env, 'c_x', at(5000))).locked, true);
   // Lock expires on the dot.
-  assert.equal((await verifyPin(env, 'c_x', '1234', at(4000 + LOCK_MS - 1))).reason, 'locked');
-  assert.deepEqual(await verifyPin(env, 'c_x', '1234', at(4000 + LOCK_MS)), { ok: true });
+  assert.equal((await verifyPin(env, 'c_x', '4821', at(4000 + LOCK_MS - 1))).reason, 'locked');
+  assert.deepEqual(await verifyPin(env, 'c_x', '4821', at(4000 + LOCK_MS)), { ok: true });
   assert.equal(env.DB.raw.prepare('SELECT failed_count FROM purchase_pins').get().failed_count, 0);
 
   // Four wrong, then a right one, then four wrong: never locks.
   for (let i = 0; i < 4; i += 1) await verifyPin(env, 'c_x', '0000', at(LOCK_MS + 10_000 + i * 1000));
-  assert.deepEqual(await verifyPin(env, 'c_x', '1234', at(LOCK_MS + 20_000)), { ok: true });
+  assert.deepEqual(await verifyPin(env, 'c_x', '4821', at(LOCK_MS + 20_000)), { ok: true });
   for (let i = 0; i < 4; i += 1) assert.equal((await verifyPin(env, 'c_x', '0000', at(LOCK_MS + 30_000 + i * 1000))).reason, 'wrong');
 });
 
 test('lockout window: wrong PINs spread over more than 15 minutes do not add up', async () => {
-  const env = await withPin('1234');
+  const env = await withPin('4821');
   for (let i = 0; i < 4; i += 1) await verifyPin(env, 'c_x', '0000', at(i * 1000));
   // The fifth arrives after the window has closed: the count restarts at 1.
   const late = await verifyPin(env, 'c_x', '0000', at(LOCK_WINDOW_MS + 1000));
@@ -154,14 +178,14 @@ test('lockout window: wrong PINs spread over more than 15 minutes do not add up'
 });
 
 test('clearLockout and pinActivity', async () => {
-  const env = await withPin('1234');
+  const env = await withPin('4821');
   for (let i = 0; i < LOCK_AFTER; i += 1) await verifyPin(env, 'c_x', '0000', at(i * 1000));
   const a = await pinActivity(env, NOW.toISOString(), at(10_000));
   assert.equal(a.failed, 5);
   assert.deepEqual(a.locked.map((l) => l.contactId), ['c_x']);
   assert.deepEqual(await clearLockout(env, 'c_x'), { ok: true, cleared: true });
   assert.deepEqual(await clearLockout(env, 'c_nobody'), { ok: true, cleared: false });
-  assert.deepEqual(await verifyPin(env, 'c_x', '1234', at(10_000)), { ok: true });
+  assert.deepEqual(await verifyPin(env, 'c_x', '4821', at(10_000)), { ok: true });
   const after = await pinActivity(env, NOW.toISOString(), at(10_000));
   assert.equal(after.failed, 5, 'the record of failures stays');
   assert.deepEqual(after.locked, []);
@@ -258,10 +282,13 @@ test('the setup page flow: read the token, set the PIN, the token is spent', asy
   const bad = await call('/api/tab/pin-set', { method: 'POST', body: { token, pin: '12' } });
   assert.equal(bad.status, 400);
   assert.equal((await bad.json()).reason, 'bad_format');
-  const ok = await call('/api/tab/pin-set', { method: 'POST', body: { token, pin: '4321' } });
+  const weak = await call('/api/tab/pin-set', { method: 'POST', body: { token, pin: '1111' } });
+  assert.equal(weak.status, 400);
+  assert.equal((await weak.json()).reason, 'weak');
+  const ok = await call('/api/tab/pin-set', { method: 'POST', body: { token, pin: '5150' } });
   assert.equal(ok.status, 200);
   assert.equal(env.DB.raw.prepare("SELECT set_by FROM purchase_pins WHERE payer_contact_id = 'c_dan'").get().set_by, 'link');
-  const spent = await call('/api/tab/pin-set', { method: 'POST', body: { token, pin: '4321' } });
+  const spent = await call('/api/tab/pin-set', { method: 'POST', body: { token, pin: '5150' } });
   assert.equal(spent.status, 400);
   assert.equal((await spent.json()).reason, 'used');
   assert.deepEqual(await (await call(`/api/tab/pin-token?t=${token}`)).json(), { ok: false, reason: 'used' });

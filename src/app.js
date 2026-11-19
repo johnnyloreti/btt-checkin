@@ -26,7 +26,7 @@ import { recordCheckin } from './checkin.js';
 import { today, classRoster, voidAttendance, memberHistory, awayList, trends } from './staff.js';
 import { lessonsEnabled, lessonFor, lessonsOn, weekPlan, savePlan, saveNote } from './lessons.js';
 import { progressEnabled, progressFieldKey, progressPage, progressLinkFor, writeProgressLink, linkContactFor } from './progress.js';
-import { memberLogin } from './member.js';
+import { memberLogin, linkAllowance, recordLinkSend, pinLinksToday, WEB_PIN_LINKS_PER_DAY } from './member.js';
 import { localParts, localDayBounds } from './time.js';
 
 /** Static files the Worker will hand to the assets binding. Everything else is 404. */
@@ -460,17 +460,26 @@ export function createApp(schedule, deps = defaultDeps(), opts = {}) {
             if (path === '/api/member/link') {
               if (!canText) return json({ ok: false, reason: 'off' }, 409);
               const link = await progressLinkFor(env, member, publicOrigin(env, url));
+              // One a day per account, and a ceiling across everyone: the
+              // Worker counts, it does not lean on GHL ignoring an unchanged
+              // field (§15.9).
+              const day = localParts(at, env.TZ || tz).date;
+              const may = await linkAllowance(env, link.contactId, day, at);
+              if (!may.ok && may.reason === 'today') return json({ ok: true, sent: false, reason: 'today' });
+              if (!may.ok) return json({ ok: false, reason: may.reason }, 429);
               const r = deps.progressLink ? await deps.progressLink(env, link.contactId, link.url, at) : { ok: false, reason: 'no link writer' };
               if (!r.ok) {
                 await logSyncRow(env, 'progress_link', 'failed', { contactId: link.contactId, reason: r.reason }, at);
                 return json({ error: 'could not send the link' }, 502);
               }
-              return json({ ok: true });
+              await recordLinkSend(env, link.contactId, day, at);
+              return json({ ok: true, sent: true });
             }
 
             // Set up or reset the PIN: the same one-time link the kiosk sends
             // (§15.3), for the account, under the same 10-minute limit.
             if (!canPin) return json({ ok: false, reason: 'off' }, 409);
+            if ((await pinLinksToday(env, account, at)) >= WEB_PIN_LINKS_PER_DAY) return json({ ok: true, sent: false, reason: 'today' });
             const t = await createSetupToken(env, account, 'link', at);
             if (!t.ok) return json({ ok: true, sent: false, reason: t.reason });
             const r = deps.pinLink ? await deps.pinLink(env, account, setupLink(tabCfg, url, t.token), at) : { ok: false, reason: 'no link writer' };

@@ -22,7 +22,7 @@ const NOW = new Date('2026-09-24T22:20:00Z'); // Thu 6:20 PM ET, Adult BJJ at 6:
 const at = (ms) => new Date(NOW.getTime() + ms);
 const ON = { TAB_ITEMS: 'water,hydration', TAB_PROGRAMS: 'adult', PIN_PEPPER: PEPPER };
 
-async function givePin(env, contactId, pin = '1234') {
+async function givePin(env, contactId, pin = '4821') {
   const t = await createSetupToken(env, contactId, 'staff', NOW);
   assert.equal((await completeSetup(env, t.token, pin, NOW)).ok, true);
 }
@@ -142,13 +142,13 @@ test('the no-card flag hides the row, and the row is gone when the tab is off or
 test('purchase: right PIN records the drink; wrong, locked, no PIN, kid, unknown item and flag are each refused by status', async () => {
   const { env, call, id } = await setup();
   const dan = await id('c_dan');
-  const buy = (body) => call('/api/tab/purchase', { method: 'POST', body: { contactId: dan, item: 'water', pin: '1234', ...body } });
+  const buy = (body) => call('/api/tab/purchase', { method: 'POST', body: { contactId: dan, item: 'water', pin: '4821', ...body } });
 
   const noPin = await buy({});
   assert.equal(noPin.status, 409);
   assert.equal((await noPin.json()).reason, 'no_pin');
 
-  await givePin(env, 'c_dan', '1234');
+  await givePin(env, 'c_dan', '4821');
   const ok = await buy({});
   assert.equal(ok.status, 200);
   const body = await ok.json();
@@ -173,9 +173,9 @@ test('purchase: right PIN records the drink; wrong, locked, no PIN, kid, unknown
   assert.equal(lb.reason, 'locked');
   assert.ok(lb.lockedUntil);
 
-  const kid = await call('/api/tab/purchase', { method: 'POST', body: { contactId: await id('c_jack'), item: 'water', pin: '1234' } });
+  const kid = await call('/api/tab/purchase', { method: 'POST', body: { contactId: await id('c_jack'), item: 'water', pin: '4821' } });
   assert.equal(kid.status, 403);
-  assert.equal((await call('/api/tab/purchase', { method: 'POST', body: { contactId: 'zzz', item: 'water', pin: '1234' } })).status, 404);
+  assert.equal((await call('/api/tab/purchase', { method: 'POST', body: { contactId: 'zzz', item: 'water', pin: '4821' } })).status, 404);
 
   env.DB.raw.prepare("INSERT INTO tab_flags VALUES ('c_dan', '2026-09-20T00:00:00Z')").run();
   env.DB.raw.prepare('UPDATE purchase_pins SET locked_until = NULL, failed_count = 0').run();
@@ -185,7 +185,7 @@ test('purchase: right PIN records the drink; wrong, locked, no PIN, kid, unknown
 test('purchase is 404 when the tab is off or its migration is pending', async () => {
   for (const opts of [{ tabOn: false }, { noTab: true }]) {
     const { call, id } = await setup(opts);
-    assert.equal((await call('/api/tab/purchase', { method: 'POST', body: { contactId: await id('c_dan'), item: 'water', pin: '1234' } })).status, 404);
+    assert.equal((await call('/api/tab/purchase', { method: 'POST', body: { contactId: await id('c_dan'), item: 'water', pin: '4821' } })).status, 404);
   }
 });
 
@@ -301,7 +301,7 @@ test('/api/tab/status gives the same drink row as a check-in, and records nothin
 
   // A purchase needs no check-in first.
   env.DB.raw.prepare('DELETE FROM tab_flags').run();
-  const bought = await (await call('/api/tab/purchase', { method: 'POST', body: { contactId: await id('c_dan'), item: 'water', pin: '1234' } })).json();
+  const bought = await (await call('/api/tab/purchase', { method: 'POST', body: { contactId: await id('c_dan'), item: 'water', pin: '4821' } })).json();
   assert.equal(bought.ok, true);
   assert.equal(env.DB.raw.prepare('SELECT COUNT(*) AS n FROM attendance').get().n, 0);
 });

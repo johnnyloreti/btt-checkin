@@ -177,9 +177,9 @@
     $('text-link').disabled = true;
     try {
       const r = await postJson('/api/member/link', { contactId: picked.id });
-      $('msg').textContent = r.body.ok
-        ? 'Sent. Check your texts. One link a day goes to the phone we have on file.'
-        : "That didn't go through. Ask at the desk.";
+      if (r.body.ok && r.body.sent === false) $('msg').textContent = 'We already sent it today. Check your texts, or ask at the desk.';
+      else if (r.body.ok) $('msg').textContent = 'Sent. Check your texts. One link a day goes to the phone we have on file.';
+      else $('msg').textContent = "That didn't go through. Ask at the desk.";
     } catch {
       $('msg').textContent = "That didn't go through. Check your connection and try again.";
     }
@@ -191,7 +191,8 @@
     $('pin-setup').disabled = true;
     try {
       const r = await postJson('/api/member/pin-link', { contactId: picked.id });
-      if (r.body.ok) $('msg').textContent = r.body.sent ? 'Check your texts for a link to set your PIN.' : 'We just sent one. Check your texts.';
+      if (r.body.ok && r.body.sent) $('msg').textContent = 'Check your texts for a link to set your PIN.';
+      else if (r.body.ok) $('msg').textContent = r.body.reason === 'today' ? 'We sent a few today already. Check your texts, or ask at the desk.' : 'We just sent one. Check your texts.';
       else $('msg').textContent = "That didn't go through. Ask at the desk.";
     } catch {
       $('msg').textContent = "That didn't go through. Check your connection and try again.";
@@ -206,7 +207,8 @@
         fetch('/api/roster', { cache: 'no-store' }).then((x) => x.json()),
       ]);
       options = { canPin: Boolean(o.canPin), canText: Boolean(o.canText) };
-      roster = Array.isArray(r) ? r : [];
+      if (!Array.isArray(r)) throw new Error('no member list');
+      roster = r;
     } catch {
       $('find-hint').textContent = 'We could not load the member list. Check your connection and try again.';
     }

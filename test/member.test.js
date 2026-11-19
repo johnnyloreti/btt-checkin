@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { createApp } from '../src/app.js';
 import { syncRoster } from '../src/roster.js';
 import { completeSetup, createSetupToken, verifyPin, pinStatus, pinActivity } from '../src/pin.js';
-import { memberLogin, webFailures, WEB_FAIL_LIMIT, WEB_GLOBAL_LIMIT, WEB_WINDOW_MS } from '../src/member.js';
+import { memberLogin, webFailures, linkAllowance, WEB_FAIL_LIMIT, WEB_GLOBAL_LIMIT, WEB_WINDOW_MS, WEB_LINKS_GLOBAL, WEB_PIN_LINKS_PER_DAY } from '../src/member.js';
 import { progressToken, writeProgressLink } from '../src/progress.js';
 import { loadSchedule } from '../src/schedule.js';
 import { loadTabItems } from '../src/tab.js';
@@ -87,8 +87,8 @@ test('a kid is opened with the parent\'s PIN, and the page is the family\'s', as
   link('c_jack', PARENT);
   link('c_emma', PARENT);
   await givePin(PARENT, '7007');
-  await givePin('c_jack', '1111'); // a PIN on the kid's own contact is not the account's
-  assert.equal((await login('c_jack', '1111')).status, 401);
+  await givePin('c_jack', '2468'); // a PIN on the kid's own contact is not the account's
+  assert.equal((await login('c_jack', '2468')).status, 401);
   const res = await login('c_jack', '7007');
   assert.equal(res.status, 200);
   const { url } = await res.json();
@@ -138,6 +138,35 @@ test('five wrong tries pause that account for a day, even for the right PIN; oth
   assert.equal((await login('c_dan', '4821')).status, 200);
 });
 
+test('a burst of guesses sent together cannot outrun the limit', async () => {
+  const { env, givePin, at } = await setup();
+  await givePin('c_dan', '4821');
+  // Twenty at once, the right PIN among them. Counting before writing let
+  // every one of these read "no failures yet" and have its guess checked.
+  const pins = Array.from({ length: 19 }, (_, i) => String(3000 + i * 37)).concat('4821');
+  const results = await Promise.all(pins.map((p) => memberLogin(env, 'c_dan', p, at())));
+  const checked = results.filter((r) => r.ok || r.reason === 'wrong').length;
+  assert.ok(checked <= WEB_FAIL_LIMIT, `${checked} guesses were checked`);
+  const after = await webFailures(env, 'c_dan', at());
+  assert.ok(after.own <= WEB_FAIL_LIMIT, 'and no more than the limit were recorded');
+  // Tries that were turned away gave their claim back, so they did not
+  // start a pause of their own.
+  assert.equal(after.own, results.filter((r) => r.reason === 'wrong').length);
+  if (after.own < WEB_FAIL_LIMIT) assert.deepEqual(await memberLogin(env, 'c_dan', '4821', at()), { ok: true });
+});
+
+test('a right PIN leaves nothing behind, and a wrong one says how many tries are left', async () => {
+  const { env, givePin, DB, at } = await setup();
+  await givePin('c_dan', '4821');
+  assert.deepEqual(await memberLogin(env, 'c_dan', '4821', at()), { ok: true });
+  assert.equal(DB.raw.prepare('SELECT COUNT(*) AS n FROM pin_failures').get().n, 0);
+  assert.deepEqual(await memberLogin(env, 'c_dan', '5555', at()), { ok: false, reason: 'wrong', left: WEB_FAIL_LIMIT - 1 });
+  assert.equal(DB.raw.prepare('SELECT COUNT(*) AS n FROM pin_failures').get().n, 1);
+  // During a pause nothing more is written, so guessing cannot stretch it.
+  for (let i = 0; i < 10; i += 1) await memberLogin(env, 'c_dan', '5555', at());
+  assert.equal(DB.raw.prepare('SELECT COUNT(*) AS n FROM pin_failures').get().n, WEB_FAIL_LIMIT);
+});
+
 test('guessing online never touches the kiosk: no lock on purchases, and a kiosk lock does not stop the login', async () => {
   const { env, givePin, login, at } = await setup();
   await givePin('c_dan', '4821');
@@ -168,20 +197,67 @@ test('thirty wrong tries across accounts pause PIN login for everyone, and staff
   assert.equal((await pinActivity(env, new Date(at().getTime() - 3600_000).toISOString(), at())).failed, WEB_GLOBAL_LIMIT, 'web guesses count on the staff page');
 });
 
-test('text me my link: written for the account, once a day by the stamp, and it says nothing about who that is', async () => {
+test('text me my link: written for the account, and it says nothing about who that is', async () => {
   const { call, link, sent } = await setup();
   const jack = await opaqueId('c_jack', SALT);
   let res = await call('/api/member/link', { method: 'POST', body: { contactId: jack } });
   assert.equal(res.status, 200);
-  assert.deepEqual(await res.json(), { ok: true });
+  assert.deepEqual(await res.json(), { ok: true, sent: true });
   link('c_jack', PARENT);
   res = await call('/api/member/link', { method: 'POST', body: { contactId: jack } });
-  assert.deepEqual(await res.json(), { ok: true }, 'no hint that it went to a parent');
+  assert.deepEqual(await res.json(), { ok: true, sent: true }, 'no hint that it went to a parent');
   assert.deepEqual(sent.progress, [
     ['c_jack', `https://checkin.bttbridgewater.com/me?t=${await progressToken('c_jack', SALT)}`, null],
     [PARENT, `https://checkin.bttbridgewater.com/me?t=${await progressToken(PARENT, SALT)}`, null],
   ]);
   assert.equal((await call('/api/member/link', { method: 'POST', body: { contactId: 'f'.repeat(20) } })).status, 404);
+});
+
+test('text me my link: the Worker itself sends one a day per account, whoever taps and however often', async () => {
+  const { call, link, sent, tick, DB } = await setup();
+  const dan = await opaqueId('c_dan', SALT);
+  const post = (id) => call('/api/member/link', { method: 'POST', body: { contactId: id } });
+  assert.deepEqual(await (await post(dan)).json(), { ok: true, sent: true });
+  for (let i = 0; i < 5; i += 1) {
+    const again = await post(dan);
+    assert.equal(again.status, 200);
+    assert.deepEqual(await again.json(), { ok: true, sent: false, reason: 'today' });
+  }
+  assert.equal(sent.progress.length, 1, 'nothing more was written to GHL');
+
+  // Two kids of one parent are one account: the second tap sends nothing.
+  link('c_jack', PARENT);
+  link('c_emma', PARENT);
+  assert.equal((await (await post(await opaqueId('c_jack', SALT))).json()).sent, true);
+  assert.equal((await (await post(await opaqueId('c_emma', SALT))).json()).sent, false);
+  assert.equal(sent.progress.length, 2);
+
+  // The next ET day it goes again. 15:00Z is 11 AM; 14 hours on is 1 AM the next day.
+  tick(14 * 3600_000);
+  assert.equal((await (await post(dan)).json()).sent, true);
+  assert.equal(sent.progress.length, 3);
+  assert.equal(DB.raw.prepare("SELECT COUNT(*) AS n FROM sync_log WHERE job = 'member_link'").get().n, 3);
+});
+
+test('text me my link: a ceiling across every account in 24 hours, and a failed write is not counted', async () => {
+  let fail = true;
+  const sentTo = [];
+  const { call, DB, env, at } = await setup({ deps: { progressLink: async (e, contactId) => { if (fail) return { ok: false, reason: 'GHL 500' }; sentTo.push(contactId); return { ok: true }; } } });
+  const dan = await opaqueId('c_dan', SALT);
+  const post = (id) => call('/api/member/link', { method: 'POST', body: { contactId: id } });
+  assert.equal((await post(dan)).status, 502);
+  fail = false;
+  assert.equal((await (await post(dan)).json()).sent, true, 'the failed try did not use up the day');
+
+  // Fill the ceiling with other accounts' sends, as if a stranger tapped every name.
+  const ins = DB.raw.prepare("INSERT INTO sync_log (job, ran_at, outcome, detail) VALUES ('member_link', ?, 'ok', ?)");
+  for (let i = 1; i < WEB_LINKS_GLOBAL; i += 1) ins.run(at().toISOString(), `someone${i}|2026-09-23`);
+  const blocked = await post(await opaqueId('c_maria', SALT));
+  assert.equal(blocked.status, 429);
+  assert.deepEqual(await blocked.json(), { ok: false, reason: 'busy' });
+  assert.deepEqual(sentTo, ['c_dan']);
+  // A day later the ceiling has cleared.
+  assert.deepEqual(await linkAllowance(env, 'c_maria', '2026-09-24', new Date(at().getTime() + WEB_WINDOW_MS + 1000)), { ok: true });
 });
 
 test('the stamp: a member\'s own request changes once a day, a staff send changes by the minute', async () => {
@@ -225,6 +301,20 @@ test('set up or reset my PIN: a one-time link for the account, one per ten minut
   assert.equal(set.status, 200);
   assert.equal(DB.raw.prepare('SELECT COUNT(*) AS n FROM purchase_pins WHERE payer_contact_id = ?').get(PARENT).n, 1);
   assert.equal((await memberLogin(env, PARENT, '3344', new Date())).ok, true);
+});
+
+test('set up or reset my PIN: no more than three links a day for one account', async () => {
+  const { call, sent, tick } = await setup();
+  const dan = await opaqueId('c_dan', SALT);
+  const post = async () => (await call('/api/member/pin-link', { method: 'POST', body: { contactId: dan } })).json();
+  for (let i = 0; i < WEB_PIN_LINKS_PER_DAY; i += 1) {
+    assert.deepEqual(await post(), { ok: true, sent: true }, `link ${i + 1}`);
+    tick(11 * 60_000);
+  }
+  assert.deepEqual(await post(), { ok: true, sent: false, reason: 'today' });
+  assert.equal(sent.pin.length, WEB_PIN_LINKS_PER_DAY);
+  tick(WEB_WINDOW_MS);
+  assert.deepEqual(await post(), { ok: true, sent: true }, 'a day on, it sends again');
 });
 
 test('with the tab off there is no PIN to type or set, but the text link still works', async () => {

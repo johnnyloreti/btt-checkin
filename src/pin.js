@@ -18,6 +18,19 @@ export const TOKEN_TTL_MS = 30 * 60_000;
 export const LINK_MIN_GAP_MS = 10 * 60_000; // one kiosk-requested link per member per 10 minutes
 export const PIN_LINK_FIELD = 'purchase_pin_link';
 
+/**
+ * PINs nobody should set: one digit four times (0000), or four in a row up or
+ * down (1234, 9876). Twenty-four of the ten thousand, and the first anyone
+ * would try. Refused at setup only: a PIN set before this rule still works.
+ * It matters more since the PIN also opens the member page (§15.9), which a
+ * stranger can reach without standing at the desk.
+ */
+export function isWeakPin(pin) {
+  const p = String(pin ?? '');
+  if (!PIN_RE.test(p)) return false;
+  return /^(\d)\1{3}$/.test(p) || '0123456789'.includes(p) || '9876543210'.includes(p);
+}
+
 export function requirePepper(env) {
   const p = String(env.PIN_PEPPER || '');
   if (p.length < 16) throw new Error('PIN_PEPPER is not set (needs at least 16 characters)');
@@ -150,6 +163,9 @@ export async function completeSetup(env, token, pin, now = new Date()) {
   if (!PIN_RE.test(String(pin ?? ''))) return { ok: false, reason: 'bad_format' };
   const t = await readSetupToken(env, token, now);
   if (!t.ok) return t;
+  // After the token is read, so a bad link still says it is a bad link. The
+  // token is not spent: the member picks another PIN on the same page.
+  if (isWeakPin(pin)) return { ok: false, reason: 'weak' };
   const salt = randomHex(16);
   const db = env.DB;
   await db.batch([

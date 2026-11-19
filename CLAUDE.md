@@ -483,6 +483,7 @@ Copy follows §0.9: no exclamation points, no em dashes, no emoji beyond the exi
 - **Belongs to the payer**, not the person drinking. In Phase 1 they are the same adult. In Phase 1b a kid's purchase asks for the parent's PIN.
 - **Stored** in D1 as `HMAC-SHA256(key = PIN_PEPPER, message = salt || payer_contact_id || pin)` with a random per-member salt, hex. Not PBKDF2: Workers WebCrypto rejects more than 100,000 PBKDF2 iterations, and even that likely exceeds the Free plan's CPU budget per request. Slow hashing does not protect a 4-digit PIN anyway, because anyone holding the table can try all 10,000. The protection is `PIN_PEPPER`, which never touches D1. Compare in constant time. PINs are never stored in GHL or logged.
 - **Setup by text, following the §15.1 pattern.** The Worker never sends messages. "Text me a setup link" creates a one-time token (random, 30-minute expiry, single use, stored hashed) and writes the link into the contact custom field `purchase_pin_link` with the allowed contact write. Johnny's workflow "Check-In: Purchase PIN setup link" fires on that field changing and texts the link. The Worker **never clears** that field; it only overwrites it with a new link. The link opens a small page on the Worker (`/pin`) where the member enters the PIN twice. The page talks about purchases generally, not drinks: the same PIN covers merchandise in Phase 2 (Johnny, 2026-09-25).
+- **Weak PINs are refused at setup** (2026-11-19, when the PIN also began opening the member page, §15.9): one digit four times, or four in a row up or down, 24 of the 10,000 (`isWeakPin` in `src/pin.js`). The setup page says "That one is easy to guess. Pick a different PIN." and the link is not spent. A PIN set before the rule still works.
 - **Staff help:** the staff page can open the same setup screen for a member standing at the desk, and the member types the PIN themselves. Staff never type a member's PIN. Staff can also clear a lockout.
 - **Forgot PIN** on the kiosk is the same text-a-link flow, under the same 10-minute limit.
 - `purchase_pin_link` is added to `requiredFieldKeys` in `src/fields.js` when the tab is on, so a missing field shows on `/health` before the first member taps the button.
@@ -760,8 +761,8 @@ Johnny: "a separate page for members like we did for staff with a log in or PIN 
 
 **The page.** Type a name and tap it, the kiosk's search. Then:
 - **PIN:** four digits, "Open my page". A right PIN returns the account's progress link and the page opens.
-- **Text me my link:** the §15.7 link is written to the contact's `PROGRESS_FIELD` and GHL texts it. One a day: the value carries the day only, so a second tap the same day changes nothing and sends nothing, and the public button cannot be used to flood a phone. (A staff "Text it" carries the minute too and can be sent again.)
-- **Set up or reset my PIN:** the same one-time setup link the kiosk sends (§15.3), under the same ten-minute limit.
+- **Text me my link:** the §15.7 link is written to the contact's `PROGRESS_FIELD` and GHL texts it. One a day per account, and the Worker enforces it itself: each send is a `sync_log` row (`job = 'member_link'`), a second tap the same ET day writes nothing to GHL and says "We already sent it today", and `WEB_LINKS_GLOBAL` (40) sends across every account in 24 hours is the ceiling, so a stranger tapping every name cannot text the whole gym. A write that failed is not counted. (A staff "Text it" carries the minute too and can be sent again.)
+- **Set up or reset my PIN:** the same one-time setup link the kiosk sends (§15.3), under the same ten-minute limit, and no more than `WEB_PIN_LINKS_PER_DAY` (3) for one account in 24 hours.
 
 **The account.** For a member with a parent linked (`payer_contact_id`, §15.1) the account is the parent's: the parent's PIN, the parent's phone, and a page with every kid of theirs on it. A kid's own contact is never asked for a PIN. Responses never say which contact a text went to.
 
@@ -770,6 +771,7 @@ Johnny: "a separate page for members like we did for staff with a log in or PIN 
 **Guessing.** A four-digit PIN on a public page can be guessed in a way the iPad at the desk cannot, so web tries are counted on their own, in `pin_failures` under `web:<contact id>`:
 - `WEB_FAIL_LIMIT` (5) wrong tries on one account in 24 hours pause PIN login for that account, the right PIN included.
 - `WEB_GLOBAL_LIMIT` (30) wrong tries across every account in 24 hours pause PIN login for everyone.
+- A try is **claimed before the PIN is looked at** (the `pin_failures` row is written first and the deciding count is taken after it), so a burst of requests sent together cannot each read "no failures yet" and get more guesses than the limit. A right PIN, and a try during a pause, give the claim back. (Review fix, 2026-11-19.)
 - A pause **never touches the kiosk**: `memberLogin` in `src/member.js` does not write `purchase_pins`, so a stranger guessing online cannot lock a member out of buying a drink, and a kiosk lock does not stop a login. The text link works throughout.
 - Web tries show in the staff Tab screen's "wrong PINs today" count.
 
