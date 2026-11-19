@@ -514,8 +514,8 @@ test('autoHourFrom and the cron mapping', () => {
   assert.equal(autoHourFrom(' 0 '), 0);
   for (const bad of ['', 'off', '24', '-1', '8pm', undefined]) assert.equal(autoHourFrom(bad), null, String(bad));
   const TZ = 'America/New_York';
-  assert.deepEqual(jobsForCron('*/30 * * * *', new Date('2026-09-26T12:00:00Z'), TZ), ['roster']);
-  assert.deepEqual(jobsForCron('*/30 * * * *', new Date('2026-09-26T12:00:00Z'), TZ, { tabOn: true }), ['roster', 'tab']);
+  assert.deepEqual(jobsForCron('*/30 * * * *', new Date('2026-09-26T12:00:00Z'), TZ), ['roster', 'rollup_more']);
+  assert.deepEqual(jobsForCron('*/30 * * * *', new Date('2026-09-26T12:00:00Z'), TZ, { tabOn: true }), ['roster', 'rollup_more', 'tab']);
   assert.deepEqual(jobsForCron('*/30 * * * *', new Date('2026-09-26T07:00:00Z'), TZ, { tabOn: true }), ['roster', 'rollup', 'tab']);
   // 8 PM EDT is 00:00Z the next day.
   assert.equal(isTabStartTick(new Date('2026-09-27T00:00:00Z'), TZ, 20), true);

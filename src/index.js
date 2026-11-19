@@ -27,9 +27,9 @@ export default {
       if (job === 'roster') {
         const result = await deps.runRosterSync(env, schedule, now);
         console.log(`roster sync: ${result.outcome}`, JSON.stringify(result));
-      } else if (job === 'rollup') {
-        const result = await deps.runRollup(env, schedule, now);
-        console.log(`rollup push: ${result.outcome}`, JSON.stringify(result));
+      } else if (job === 'rollup' || job === 'rollup_more') {
+        const result = await deps.runRollup(env, schedule, now, { resume: job === 'rollup_more' });
+        if (result.did !== false) console.log(`rollup push: ${result.outcome}`, JSON.stringify(result));
       } else if (job === 'tab') {
         const result = await deps.runTab(env, tab, now, { start: isTabStartTick(now, tz, tab.autoHour) });
         if (result.did) console.log(`tab close-out: ${result.outcome}`, JSON.stringify(result));

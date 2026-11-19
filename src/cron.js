@@ -1,7 +1,7 @@
 // cron.js — map a cron firing to the jobs it should run.
 // One trigger, every 30 minutes, drives every job: the roster sync runs on
-// every tick, the rollup on the tick that lands at 03:00 in the gym's
-// timezone, and the drink tab (§15.3) on every tick too, doing real work
+// every tick, the rollup starts on the tick that lands at 03:00 in the
+// gym's timezone and carries on in batches on the ticks after it, and the drink tab (§15.3) on every tick too, doing real work
 // only when there is something to continue or when the auto-close-out hour
 // comes round. One schedule keeps the Worker inside the Workers Free limit
 // of 5 cron triggers per account, and DST needs no redeploy.
@@ -21,7 +21,9 @@ export function jobsForCron(cron, now, tz, { tabOn = false, tabAutoHour = null }
   if (cron !== TICK_CRON) return [];
   const local = localParts(now, tz);
   const jobs = ['roster'];
-  if (local.hour === ROLLUP_HOUR_LOCAL && local.minute === ROLLUP_MINUTE_LOCAL) jobs.push('rollup');
+  // The nightly tick starts the rollup; every other tick carries on a run
+  // that stopped at its batch limit, and is one cheap query when none did.
+  jobs.push(local.hour === ROLLUP_HOUR_LOCAL && local.minute === ROLLUP_MINUTE_LOCAL ? 'rollup' : 'rollup_more');
   if (tabOn) jobs.push('tab');
   return jobs;
 }

@@ -19,6 +19,10 @@ MEMBER_TAG_PREFIXES = "foundations-"
 CHECKIN_EARLY_MIN = "180"
 CHECKIN_LATE_MIN = "180"
 
+# Nightly rollup to GHL (§6): contacts pushed per cron tick, one GHL call
+# each. A night with more than this is finished on the ticks that follow.
+ROLLUP_BATCH = "20"
+
 # How many days back a check-in may be dated. The kiosk only needs room for a
 # queued retry to land; staff need room to backfill a class nobody tapped for.
 KIOSK_BACKDATE_DAYS = "3"

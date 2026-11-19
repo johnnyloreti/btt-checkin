@@ -5,19 +5,19 @@ import { localParts } from '../src/time.js';
 
 const TZ = 'America/New_York';
 
-test('every tick runs the roster sync', () => {
-  assert.deepEqual(jobsForCron('*/30 * * * *', new Date('2026-09-06T12:00:00Z'), TZ), ['roster']);
-  assert.deepEqual(jobsForCron('*/30 * * * *', new Date('2026-09-06T12:30:00Z'), TZ), ['roster']);
+test('every tick runs the roster sync, and offers to carry on a rollup that stopped at its batch limit', () => {
+  assert.deepEqual(jobsForCron('*/30 * * * *', new Date('2026-09-06T12:00:00Z'), TZ), ['roster', 'rollup_more']);
+  assert.deepEqual(jobsForCron('*/30 * * * *', new Date('2026-09-06T12:30:00Z'), TZ), ['roster', 'rollup_more']);
 });
 
-test('the 03:00 ET tick also runs the rollup, in EDT and EST', () => {
+test('the 03:00 ET tick starts the rollup, in EDT and EST', () => {
   // July: EDT (UTC-4), so 07:00 UTC is 03:00 ET.
   assert.deepEqual(jobsForCron('*/30 * * * *', new Date('2026-07-15T07:00:00Z'), TZ), ['roster', 'rollup']);
-  assert.deepEqual(jobsForCron('*/30 * * * *', new Date('2026-07-15T07:30:00Z'), TZ), ['roster']);
-  assert.deepEqual(jobsForCron('*/30 * * * *', new Date('2026-07-15T08:00:00Z'), TZ), ['roster']);
+  assert.deepEqual(jobsForCron('*/30 * * * *', new Date('2026-07-15T07:30:00Z'), TZ), ['roster', 'rollup_more']);
+  assert.deepEqual(jobsForCron('*/30 * * * *', new Date('2026-07-15T08:00:00Z'), TZ), ['roster', 'rollup_more']);
   // January: EST (UTC-5), so 08:00 UTC is 03:00 ET.
   assert.deepEqual(jobsForCron('*/30 * * * *', new Date('2026-01-15T08:00:00Z'), TZ), ['roster', 'rollup']);
-  assert.deepEqual(jobsForCron('*/30 * * * *', new Date('2026-01-15T07:00:00Z'), TZ), ['roster']);
+  assert.deepEqual(jobsForCron('*/30 * * * *', new Date('2026-01-15T07:00:00Z'), TZ), ['roster', 'rollup_more']);
 });
 
 test('unknown cron maps to nothing', () => {

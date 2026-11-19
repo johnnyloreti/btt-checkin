@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { computeRollup, mondayOf, runRollup, resetFieldCache, FIELD_KEYS } from '../src/rollup.js';
+import { computeRollup, mondayOf, runRollup, resetFieldCache, rollupBatch, FIELD_KEYS, DEFAULT_ROLLUP_BATCH, MAX_ROLLUP_BATCH } from '../src/rollup.js';
 import { fetchCustomFieldIds, ghlPutContactCustomFields } from '../src/ghl.js';
 import { loadSchedule } from '../src/schedule.js';
 import { readRepoFile } from './helpers.js';
@@ -217,4 +217,148 @@ test('runRollup: nothing pending is ok and cheap', async () => {
   await runRollup({ DB, TZ: 'America/New_York' }, schedule, { fetchFields: async () => (fetched += 1, ALL_FIELDS), putContact: async () => {}, now: new Date(NOW.getTime() + 60_000) });
   assert.equal(fetched, 1);
   resetFieldCache();
+});
+
+// ---------- batches across ticks ----------
+//
+// One GHL call per contact, and an invocation only gets so many. A night
+// with more pending than one batch is finished on the ticks that follow.
+
+function crowd(n, { at = '2026-09-05T15:00:00Z' } = {}) {
+  const DB = memoryD1();
+  const att = DB.raw.prepare("INSERT INTO attendance (ghl_contact_id, class_name, class_start_local, checked_in_at, method, status) VALUES (?, 'Adult BJJ', '2026-09-05T13:00', ?, 'kiosk', 'attended')");
+  const pend = DB.raw.prepare('INSERT INTO pending_rollups VALUES (?, ?)');
+  for (let i = 0; i < n; i += 1) {
+    const id = `c_${String(i).padStart(3, '0')}`;
+    att.run(id, at);
+    // Several share a queue time, as they do when a class checks in together.
+    pend.run(id, new Date(Date.parse(at) + Math.floor(i / 3) * 1000).toISOString());
+  }
+  return DB;
+}
+const tick = (n) => new Date(NOW.getTime() + n * 30 * 60_000);
+
+test('rollupBatch: 20 unless set, never under 1, never over the cap', () => {
+  assert.equal(rollupBatch({}), DEFAULT_ROLLUP_BATCH);
+  assert.equal(DEFAULT_ROLLUP_BATCH, 20);
+  assert.equal(rollupBatch({ ROLLUP_BATCH: '8' }), 8);
+  assert.equal(rollupBatch({ ROLLUP_BATCH: '0' }), 20);
+  assert.equal(rollupBatch({ ROLLUP_BATCH: 'lots' }), 20);
+  assert.equal(rollupBatch({ ROLLUP_BATCH: '500' }), MAX_ROLLUP_BATCH);
+});
+
+test('a night bigger than one batch is pushed over several ticks, each contact once, oldest first', async () => {
+  resetFieldCache();
+  const DB = crowd(47);
+  const env = { DB, TZ: 'America/New_York' };
+  const puts = [];
+  const deps = (now, resume) => ({ fetchFields: async () => ALL_FIELDS, putContact: async (id) => puts.push(id), now, resume });
+
+  const first = await runRollup(env, schedule, deps(tick(0), false));
+  assert.deepEqual([first.outcome, first.pushed, first.remaining, first.pending], ['ok', 20, 27, 47]);
+  assert.equal(puts.length, 20, 'no more GHL calls than the batch');
+  const second = await runRollup(env, schedule, deps(tick(1), true));
+  assert.deepEqual([second.pushed, second.remaining], [20, 7]);
+  const third = await runRollup(env, schedule, deps(tick(2), true));
+  assert.deepEqual([third.pushed, third.remaining], [7, 0]);
+
+  assert.equal(puts.length, 47);
+  assert.equal(new Set(puts).size, 47, 'nobody pushed twice');
+  assert.deepEqual(puts, [...puts].sort(), 'oldest first; ties by id');
+  assert.equal(DB.raw.prepare('SELECT COUNT(*) AS n FROM pending_rollups').get().n, 0);
+
+  // Done: the ticks after it are one read and nothing else.
+  const idle = await runRollup(env, schedule, deps(tick(3), true));
+  assert.deepEqual(idle, { did: false, outcome: 'ok' });
+  assert.equal(puts.length, 47);
+  assert.equal(DB.raw.prepare("SELECT COUNT(*) AS n FROM sync_log WHERE job = 'rollup'").get().n, 3, 'an idle tick writes no log row');
+});
+
+test('a check-in during the day waits for the night, even while a run is still being finished', async () => {
+  resetFieldCache();
+  const DB = crowd(25);
+  const env = { DB, TZ: 'America/New_York' };
+  const puts = [];
+  const deps = (now, resume) => ({ fetchFields: async () => ALL_FIELDS, putContact: async (id) => puts.push(id), now, resume });
+  await runRollup(env, schedule, deps(tick(0), false));
+  // Someone checks in after the run began.
+  DB.raw.prepare('INSERT INTO pending_rollups VALUES (?, ?)').run('c_late', tick(0.5).toISOString());
+  const more = await runRollup(env, schedule, deps(tick(1), true));
+  assert.deepEqual([more.pushed, more.remaining], [5, 0]);
+  assert.ok(!puts.includes('c_late'));
+  assert.deepEqual(DB.raw.prepare('SELECT ghl_contact_id FROM pending_rollups').all().map((r) => r.ghl_contact_id), ['c_late']);
+  // With no run in flight, a tick during the day pushes nothing.
+  assert.deepEqual(await runRollup(env, schedule, deps(tick(2), true)), { did: false, outcome: 'ok' });
+  // That night it goes.
+  const night = await runRollup(env, schedule, deps(tick(48), false));
+  assert.equal(night.pushed, 1);
+  assert.equal(puts.at(-1), 'c_late');
+});
+
+test('a contact whose push fails is passed over, not retried every half hour, and goes first the next night', async () => {
+  resetFieldCache();
+  const DB = crowd(30);
+  const env = { DB, TZ: 'America/New_York', ROLLUP_BATCH: '10' };
+  const tries = [];
+  const deps = (now, resume, bad = ['c_004', 'c_015']) => ({
+    fetchFields: async () => ALL_FIELDS,
+    putContact: async (id) => { tries.push(id); if (bad.includes(id)) throw new Error('GHL 400'); },
+    now, resume,
+  });
+  const a = await runRollup(env, schedule, deps(tick(0), false));
+  assert.deepEqual([a.outcome, a.pushed, a.failed, a.remaining], ['degraded', 9, 1, 20]);
+  const b = await runRollup(env, schedule, deps(tick(1), true));
+  assert.deepEqual([b.pushed, b.failed, b.remaining], [9, 1, 10]);
+  const c = await runRollup(env, schedule, deps(tick(2), true));
+  assert.deepEqual([c.outcome, c.pushed, c.failed, c.remaining], ['ok', 10, 0, 0]);
+  assert.deepEqual(await runRollup(env, schedule, deps(tick(3), true)), { did: false, outcome: 'ok' });
+  assert.equal(tries.filter((id) => id === 'c_004').length, 1, 'tried once that night');
+  assert.deepEqual(DB.raw.prepare('SELECT ghl_contact_id FROM pending_rollups ORDER BY 1').all().map((r) => r.ghl_contact_id), ['c_004', 'c_015']);
+
+  const next = await runRollup(env, schedule, deps(tick(48), false, []));
+  assert.deepEqual([next.outcome, next.pushed, next.remaining], ['ok', 2, 0]);
+  assert.equal(DB.raw.prepare('SELECT COUNT(*) AS n FROM pending_rollups').get().n, 0);
+});
+
+test('GHL down for a whole night: each tick tries its batch once, then the run ends and everything waits', async () => {
+  resetFieldCache();
+  const DB = crowd(25);
+  const env = { DB, TZ: 'America/New_York' };
+  let calls = 0;
+  const deps = (now, resume) => ({ fetchFields: async () => ALL_FIELDS, putContact: async () => { calls += 1; throw new Error('GHL 503'); }, now, resume });
+  assert.equal((await runRollup(env, schedule, deps(tick(0), false))).outcome, 'failed');
+  assert.equal((await runRollup(env, schedule, deps(tick(1), true))).outcome, 'failed');
+  assert.deepEqual(await runRollup(env, schedule, deps(tick(2), true)), { did: false, outcome: 'ok' });
+  assert.equal(calls, 25, 'one try each, not a retry storm');
+  assert.equal(DB.raw.prepare('SELECT COUNT(*) AS n FROM pending_rollups').get().n, 25);
+});
+
+test('a resume that cannot read the field list keeps its place for the next tick', async () => {
+  resetFieldCache();
+  const DB = crowd(25);
+  const env = { DB, TZ: 'America/New_York' };
+  const puts = [];
+  await runRollup(env, schedule, { fetchFields: async () => ALL_FIELDS, putContact: async (id) => puts.push(id), now: tick(0) });
+  resetFieldCache();
+  const stuck = await runRollup(env, schedule, { fetchFields: async () => { throw new Error('GHL 502'); }, putContact: async () => assert.fail('must not push'), now: tick(1), resume: true });
+  assert.equal(stuck.outcome, 'failed');
+  const again = await runRollup(env, schedule, { fetchFields: async () => ALL_FIELDS, putContact: async (id) => puts.push(id), now: tick(2), resume: true });
+  assert.deepEqual([again.pushed, again.remaining], [5, 0]);
+  assert.equal(new Set(puts).size, 25);
+  resetFieldCache();
+});
+
+test('one read of attendance for the batch, and each contact gets their own numbers', async () => {
+  resetFieldCache();
+  const DB = seeded();
+  let attendanceReads = 0;
+  const counting = { ...DB, prepare: (sql) => { if (/FROM attendance/.test(sql)) attendanceReads += 1; return DB.prepare(sql); }, batch: (s) => DB.batch(s) };
+  const puts = {};
+  await runRollup({ DB: counting, TZ: 'America/New_York' }, schedule, {
+    fetchFields: async () => ALL_FIELDS,
+    putContact: async (id, fields) => { puts[id] = fields.find((f) => f.id === 'id_2').field_value; },
+    now: NOW,
+  });
+  assert.equal(attendanceReads, 1);
+  assert.deepEqual(puts, { c_jack: '2', c_emma: '1' }, 'lifetime counts are not mixed between contacts');
 });

@@ -237,11 +237,12 @@ export function defaultDeps() {
   return {
     runRosterSync: (env, schedule, now) =>
       syncRoster(env, schedule, { fetchContacts: () => fetchAllContacts(env), fetchFields: () => fetchCustomFieldIds(env), now }),
-    runRollup: (env, schedule, now) =>
+    runRollup: (env, schedule, now, opts = {}) =>
       runRollup(env, schedule, {
         fetchFields: () => fetchCustomFieldIds(env),
         putContact: (id, fields) => ghlPutContactCustomFields(env, id, fields),
         now,
+        resume: Boolean(opts.resume),
       }),
     notifyWaiver: (env, contactId, now, opts) =>
       notifyWaiverCheckin(

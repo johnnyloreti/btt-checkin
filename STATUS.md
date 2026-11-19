@@ -151,7 +151,9 @@ Tune in `wrangler.toml`: `TAB_ITEMS` (blank turns the whole thing off), `TAB_PRO
 
 **Platform limits, recorded as unverified.** The build order asked for Cloudflare's current subrequest and CPU limits to be checked first. This container's network proxy blocks `developers.cloudflare.com`, so they could not be read here. The design assumes, from memory: 50 outbound calls per request on Workers Free, and that D1 queries count toward that. Nothing built so far comes near it (a purchase is a handful of D1 queries and no GHL call; a setup link is one GHL write). The close-out is designed for one payer per request so it stays under it whatever the exact number. Please open that page once and paste the two numbers; they go here. WebCrypto HMAC-SHA256, which the PIN uses, was exercised in Node's implementation of the same API and is the same primitive the opaque ids have used since day one.
 
-Known limit, not part of this work: the nightly rollup pushes every pending contact in one cron invocation, one GHL call each. Fine at today's numbers; it will need batching before the roster is in the dozens of pending contacts a night.
+The nightly rollup used to push every pending contact in one cron invocation, one GHL call each. **Batched 2026-11-19:** 20 a tick (`ROLLUP_BATCH`), carried on over the following ticks.
+
+**Limits, looked up again 2026-11-19, still second-hand.** `developers.cloudflare.com` is still unreachable from this container. A web search summary of Cloudflare's own pages gave: Workers Free, 50 external subrequests per invocation and 1,000 to Cloudflare's own services; the D1 limits page, 50 queries per invocation on Free. The two do not obviously agree on whether a D1 query counts against the 50. The rollup now reads attendance for a whole batch in one query and clears the batch in one, so a run is about five D1 queries whatever the batch size.
 
 ## Kids' waiver reminders go to the parent (§15.1, Phase 1b), 2026-09-29
 

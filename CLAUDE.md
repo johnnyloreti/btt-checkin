@@ -241,6 +241,8 @@ Every check-in inserts into `pending_rollups` so the nightly job only touches co
 | `attendance_week` | count, current Mon-Sun week |
 | `attendance_class_count_label` | e.g. `Class #37`, for merge fields in messages |
 
+**In batches (2026-11-19).** One GHL call per contact, and a Workers Free invocation gets about 50 outbound calls, shared with the roster sync and the tab on the same tick. So the 03:00 tick pushes `ROLLUP_BATCH` (20) contacts, oldest first, and writes where it stopped into its `sync_log` row (`remaining`, `cutoff`, `cursor`); every later tick carries on from there until the night's list is done, and is one read when there is nothing to carry on. The night's list is fixed when the run starts, so a check-in during the day still reaches GHL that night, not half an hour later. A contact whose push fails is passed over and stays pending for the next night; it is not retried every tick.
+
 Johnny creates these five custom fields in GHL (Settings, Custom Fields, contact type). On first run, the Worker resolves field keys to IDs via `GET /locations/{id}/customFields` and caches them. If any of the five is missing, log `degraded` with the missing key and skip that field; never fail the whole push.
 
 **Allowed writes, exhaustively:** `PUT /contacts/{id}` with custom field values. That was the only write until §15.3 (2026-09-25), which adds the invoice-schedule calls listed there. The write scanner test is an explicit allowlist of method + path pairs; anything else fails the suite.
@@ -283,6 +285,7 @@ Vars in `wrangler.toml`:
 - `MEMBER_TAG_PREFIXES = "foundations-"`
 - `CHECKIN_EARLY_MIN = "180"` and `CHECKIN_LATE_MIN = "180"` (§2 window, minutes)
 - `KIOSK_BACKDATE_DAYS = "3"` and `STAFF_BACKDATE_DAYS = "30"` (§3 backdating, whole days)
+- `ROLLUP_BATCH = "20"` (§6: contacts pushed to GHL per cron tick, capped at 40)
 - `TAB_ITEMS`, `TAB_PROGRAMS`, `TAB_MIN_CENTS`, `TAB_MAX_ROLL_DAYS`, `TAB_AUTO_HOUR` (§15.3 drink tab; empty `TAB_ITEMS` turns it off, empty `TAB_AUTO_HOUR` makes charging button-only)
 - `BELTS_KIDS`, `BELTS_ADULT` (§15.4 belt lists; both blank turns belts off) and `AWAY_DAYS` (§15.5; "0" turns the Away tab off)
 - `PROGRESS_PAGE`, `PROGRESS_FIELD` (§15.7; "off" removes the page, a blank field leaves staff with Copy link only) and `LESSON_NOTES` (§15.8; "off" hides lesson notes)
@@ -676,7 +679,7 @@ No refunds, no voids, no deletes, no other write. `test/write-scanner.test.js` e
 6. Close-out: review screen with the $5 / 28-day rule and per-payer card status, `closeout_payers` state machine, one payer per request, resume, Charged at POS, status refresh. Fixture tests, no network, per §9 item 11. (Built 2026-09-25 after the $0.50 test settled.)
 7. `STATUS.md` and the deploy commands.
 
-**Noted, not part of this work:** the nightly rollup in `src/rollup.js` is not batched and will hit the same 50-call limit as membership grows. Fine today; flagged in `STATUS.md`.
+**Noted, not part of this work:** the nightly rollup in `src/rollup.js` was not batched and would have hit the same 50-call limit as membership grew. Batched on 2026-11-19 (§6).
 
 #### Later phases (do not build yet; build Phase 1 so these slot in)
 
