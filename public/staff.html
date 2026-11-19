@@ -13,7 +13,7 @@
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; background: var(--bg); color: var(--bone); font-family: var(--body); }
   body { min-height: 100%; padding: 0 0 40px; }
-  header { display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg); z-index: 2; }
+  header { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg); z-index: 2; }
   header .brand { font-family: var(--display); font-weight: 600; letter-spacing: .12em; text-transform: uppercase; font-size: 15px; color: var(--muted); margin-right: auto; }
   .tab { font: inherit; font-weight: 600; font-size: 15px; background: none; border: 1px solid var(--line); color: var(--bone); padding: 10px 16px; border-radius: 999px; cursor: pointer; }
   .tab.active { background: var(--gold); color: #1a1607; border-color: var(--gold); }
@@ -68,6 +68,16 @@
   .overlay { position: fixed; inset: 0; background: var(--bg); z-index: 5; display: none; flex-direction: column; padding: 18px; overflow-y: auto; }
   .overlay.active { display: flex; }
   .overlay .top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .trend { width: 100%; border-collapse: collapse; font-size: 17px; font-variant-numeric: tabular-nums; }
+  .trend th, .trend td { padding: 12px 10px; border-bottom: 1px solid var(--line); text-align: right; }
+  .trend th { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  .trend th:first-child, .trend td:first-child { text-align: left; }
+  .trend td:first-child .d { color: var(--muted); display: inline-block; min-width: 44px; }
+  .trend td:first-child .t { color: var(--muted); font-size: 14px; margin-left: 8px; }
+  .trend .now { color: var(--gold); }
+  .trend .blank { color: var(--muted); }
+  .trend tr.sum td { font-weight: 600; border-bottom: none; }
+  .trend tr.sum.first td { border-top: 2px solid var(--line); }
   .rankform { flex-wrap: wrap; }
   .rankform select { font: inherit; font-size: 16px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--bone); }
   .rankform .held { display: flex; align-items: center; gap: 8px; font-size: 15px; color: var(--muted); flex: 1 1 260px; }
@@ -85,6 +95,7 @@
   <button class="tab active" data-tab="tonight" type="button">Tonight</button>
   <button class="tab" data-tab="stripes" type="button">Stripes</button>
   <button class="tab" data-tab="away" type="button">Away</button>
+  <button class="tab" data-tab="trends" type="button">Trends</button>
   <button class="tab" data-tab="members" type="button">Members</button>
   <button class="tab" data-tab="tab" id="tab-nav" type="button">Tab</button>
   <button class="tab quiet" id="signout" type="button">Sign out</button>
@@ -131,6 +142,12 @@
       <p class="note">On the roster with no class yet. A parent who does not train can be tagged program:none in GHL.</p>
       <div id="away-never" class="list"></div>
     </div>
+  </section>
+
+  <section id="trends" class="view">
+    <h2>Trends <span class="sub">last 4 weeks</span></h2>
+    <p class="note">Check-ins per class, Monday to Sunday. The gold column is this week so far.</p>
+    <div id="trends-box"></div>
   </section>
 
   <section id="tabview" class="view">
@@ -265,7 +282,7 @@
   }
   function showView(id) {
     for (const v of document.querySelectorAll('.view')) v.classList.toggle('active', v.id === id);
-    const tab = id === 'tonight' || id === 'class' ? 'tonight' : id === 'stripes' ? 'stripes' : id === 'away' ? 'away' : id === 'tabview' || id === 'closeout' ? 'tab' : 'members';
+    const tab = id === 'tonight' || id === 'class' ? 'tonight' : id === 'stripes' ? 'stripes' : id === 'away' ? 'away' : id === 'trends' ? 'trends' : id === 'tabview' || id === 'closeout' ? 'tab' : 'members';
     for (const t of document.querySelectorAll('.tab[data-tab]')) t.classList.toggle('active', t.dataset.tab === tab);
     window.scrollTo(0, 0);
   }
@@ -533,6 +550,51 @@
       row.addEventListener('click', open(r));
       never.appendChild(row);
     }
+  }
+
+  // ---------- trends (§15.6) ----------
+  async function loadTrends() {
+    const box = $('trends-box');
+    box.innerHTML = '';
+    let data;
+    try {
+      data = await api('/api/staff/trends');
+    } catch (e) {
+      box.appendChild(el('div', 'empty', e.message));
+      return;
+    }
+    const table = el('table', 'trend');
+    const head = el('tr');
+    head.appendChild(el('th', '', 'Class'));
+    for (const w of data.weeks) {
+      const th = el('th', w.current ? 'now' : '', w.current ? 'This week' : fmtDate(w.start).replace(/^\w+, /, ''));
+      head.appendChild(th);
+    }
+    table.appendChild(head);
+    const cell = (n, w) => el('td', `${w.current ? 'now' : ''}${n === null ? ' blank' : ''}`.trim(), n === null ? '·' : String(n));
+    for (const r of data.rows) {
+      const tr = el('tr');
+      const name = el('td');
+      name.append(el('span', 'd', r.day), document.createTextNode(r.name), el('span', 't', formatTime(r.start)));
+      tr.appendChild(name);
+      r.counts.forEach((n, i) => tr.appendChild(cell(n, data.weeks[i])));
+      table.appendChild(tr);
+    }
+    if (data.other.some((n) => n > 0)) {
+      const tr = el('tr');
+      tr.appendChild(el('td', '', 'Open mat and other'));
+      data.other.forEach((n, i) => tr.appendChild(cell(n, data.weeks[i])));
+      table.appendChild(tr);
+    }
+    const sum = (label, pick, cls) => {
+      const tr = el('tr', cls);
+      tr.appendChild(el('td', '', label));
+      data.weeks.forEach((w) => tr.appendChild(cell(pick(w), w)));
+      table.appendChild(tr);
+    };
+    sum('All check-ins', (w) => w.total, 'sum first');
+    sum('Members who trained', (w) => w.people, 'sum');
+    box.appendChild(table);
   }
 
   // ---------- members ----------
@@ -1071,6 +1133,7 @@
       if (t.dataset.tab === 'tonight') { showView('tonight'); await loadTonight(); }
       else if (t.dataset.tab === 'stripes') { showView('stripes'); await loadStripes(); }
       else if (t.dataset.tab === 'away') { showView('away'); await loadAway(); }
+      else if (t.dataset.tab === 'trends') { showView('trends'); await loadTrends(); }
       else if (t.dataset.tab === 'tab') { showView('tabview'); await loadTab(); }
       else { showView('members'); $('member-search').focus(); }
     });

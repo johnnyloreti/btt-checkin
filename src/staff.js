@@ -215,3 +215,78 @@ export async function awayList(env, schedule, now) {
   never.sort(byName);
   return { enabled: true, days: cfg.days, today: todayLocal, away, never };
 }
+
+// ---------- attendance trends (§15.6) ----------
+export const TREND_WEEKS = 4;
+
+const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+/**
+ * Headcount per class for the last TREND_WEEKS weeks, oldest first, the
+ * current week last. Weeks run Mon to Sun on the ET calendar, like the
+ * rollup's attendance_week (§6).
+ *
+ *   weeks  [{ start, end, current, total, people }]   people = distinct members
+ *   rows   [{ day, name, start, counts: [n | null] }] one per scheduled class
+ *   other  [n]  open mat, and anything not on today's schedule
+ *
+ * A count is null for a class that has not come round yet this week, so a
+ * blank reads differently from a class nobody checked in to. Removed
+ * check-ins are not counted.
+ */
+export async function trends(env, schedule, now, weeks = TREND_WEEKS) {
+  const todayLocal = localParts(now, env.TZ || schedule.timezone).date;
+  const sinceMonday = (WEEKDAYS.indexOf(weekdayLabel(todayLocal)) + 7) % 7;
+  const thisMonday = shiftDate(todayLocal, -sinceMonday);
+  const first = shiftDate(thisMonday, -7 * (weeks - 1));
+  const { results } = await env.DB.prepare(
+    `SELECT ghl_contact_id, class_name, class_start_local
+       FROM attendance
+      WHERE status = 'attended' AND class_start_local >= ? AND class_start_local < ?`,
+  )
+    .bind(`${first}T00:00`, `${shiftDate(thisMonday, 7)}T00:00`)
+    .all();
+
+  const perClass = new Map();
+  for (const r of results) {
+    const key = `${r.class_start_local}|${r.class_name}`;
+    perClass.set(key, (perClass.get(key) || 0) + 1);
+  }
+
+  const outWeeks = [];
+  const rowsByKey = new Map();
+  const matched = new Set();
+  for (let w = 0; w < weeks; w += 1) {
+    const start = shiftDate(first, 7 * w);
+    outWeeks.push({ start, end: shiftDate(start, 6), current: start === thisMonday, total: 0, people: 0 });
+    for (let d = 0; d < 7; d += 1) {
+      const date = shiftDate(start, d);
+      for (const c of classesOn(schedule, date)) {
+        const rowKey = `${d}|${c.start}|${c.name}`;
+        if (!rowsByKey.has(rowKey)) {
+          rowsByKey.set(rowKey, { day: WEEKDAYS[d], dayIndex: d, name: c.name, start: c.start, counts: new Array(weeks).fill(null) });
+        }
+        const key = `${c.startLocal}|${c.name}`;
+        matched.add(key);
+        // A class later this week has not happened: leave it blank.
+        rowsByKey.get(rowKey).counts[w] = date > todayLocal ? null : perClass.get(key) || 0;
+      }
+    }
+  }
+
+  const other = new Array(weeks).fill(0);
+  const people = outWeeks.map(() => new Set());
+  for (const r of results) {
+    const w = Math.floor(daysBetween(first, String(r.class_start_local).slice(0, 10)) / 7);
+    if (w < 0 || w >= weeks) continue;
+    outWeeks[w].total += 1;
+    people[w].add(r.ghl_contact_id);
+    if (!matched.has(`${r.class_start_local}|${r.class_name}`)) other[w] += 1;
+  }
+  outWeeks.forEach((wk, i) => { wk.people = people[i].size; });
+
+  const rows = [...rowsByKey.values()]
+    .sort((a, b) => a.dayIndex - b.dayIndex || a.start.localeCompare(b.start) || a.name.localeCompare(b.name))
+    .map(({ dayIndex, ...row }) => row);
+  return { today: todayLocal, weeks: outWeeks, rows, other };
+}

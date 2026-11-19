@@ -133,7 +133,7 @@ Kids 6-9  11:00 AM
 
 **Add a class** (on the member screen, added 2026-09-24) is the way in when one person was missed rather than a whole class: three taps instead of walking the date bar back and opening the class. Pick the day (the picker is bounded by `STAFF_BACKDATE_DAYS`, so it never offers a day the server would refuse), see only that member's classes for it, tap one. A class they are already on is marked, and tapping it anyway is a harmless duplicate. Open mat is always offered. If nothing in their program runs that day, that day's other classes are listed rather than none, because staff know better than the program tag does.
 
-No belt tracking, no notes, no billing in V1. Promotions since arrived as an approved V2 item (§15.2), belts as §15.4, and the Away tab as §15.5.
+No belt tracking, no notes, no billing in V1. Promotions since arrived as an approved V2 item (§15.2), belts as §15.4, the Away tab as §15.5, and the Trends tab as §15.6.
 
 ---
 
@@ -706,3 +706,14 @@ From the same review: staff should see who has gone quiet before they are gone. 
 Days are whole ET calendar days from the class date to today. A removed check-in is not a class. `AWAY_DAYS = "0"` turns the tab's lists off. No migration, no GHL call, nothing on the kiosk.
 
 **Not built:** the win-back message. `attendance_last` is already on every contact (§6), so a GHL workflow on that field can send it; Johnny owns the workflow and the message.
+
+### 15.6 Attendance trends (approved 2026-11-19)
+
+Johnny, continuing the BJJLink list: "let's keep going". A staff tab, **Trends**, with one table: check-ins per scheduled class for the last four weeks (`TREND_WEEKS` in `src/staff.js`), oldest on the left and this week so far on the right. Weeks run Monday to Sunday on the ET calendar, like `attendance_week` (§6).
+
+- One row per class on the schedule, in week order. A class later this week shows a dot, not a zero, so "has not happened" reads differently from "nobody came".
+- Open mat, and any check-in that is not on today's schedule, are counted in an "Open mat and other" row, shown only when it is not all zeros.
+- Two totals: all check-ins, and members who trained (a person counts once a week).
+- Removed check-ins are not counted.
+
+Rows come from `schedule.json` as it is today, so a class dropped from the schedule moves its old check-ins to the other row. No migration, no GHL call, nothing on the kiosk.

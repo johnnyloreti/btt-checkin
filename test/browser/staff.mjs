@@ -259,6 +259,26 @@ await step('away: who has gone quiet, longest first, and a tap opens the member'
   assert.equal(await page.locator('#member-title').textContent(), 'Jack Silva');
 });
 
+await step('trends: four weeks of headcount per class, this week in gold', async () => {
+  // Today is Sat Sep 5. Jack's seven classes sit on Aug 1 to 8; Emma was in today.
+  await page.click('.tab[data-tab="trends"]');
+  await page.waitForSelector('#trends-box table.trend');
+  const head = await page.locator('table.trend th').allTextContents();
+  assert.deepEqual(head, ['Class', 'Aug 10', 'Aug 17', 'Aug 24', 'This week']);
+  assert.equal(await page.locator('table.trend tr').count(), 1 + 15 + 2, 'header, 15 classes, two totals');
+  const sat = await page.locator('table.trend tr:has-text("Sat"):has-text("Kids 6-9") td').allTextContents();
+  assert.deepEqual(sat.slice(1), ['0', '0', '0', '1'], 'Emma, today');
+  const totals = await page.locator('table.trend tr.sum.first td').allTextContents();
+  assert.deepEqual(totals, ['All check-ins', '0', '0', '0', '1']);
+  assert.equal(await page.locator('table.trend td.now').count(), 17);
+  const wide = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
+  assert.equal(wide, false, 'no horizontal scroll');
+  await page.screenshot({ path: join(OUT, 'staff-trends.png') });
+  await page.click('.tab[data-tab="away"]');
+  await page.click('#away-list .row');
+  await page.waitForSelector('#member.active');
+});
+
 await step('belts: record a rank on the member screen, add a stripe, and see it on the roster', async () => {
   // Still on Jack's member screen. White until told otherwise.
   assert.equal(await page.locator('#member-rank').isVisible(), true);

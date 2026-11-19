@@ -23,7 +23,7 @@ import { buildIdMap, opaqueId, requireSalt } from './ids.js';
 import { matchClasses, windowFromEnv } from './classes.js';
 import { allowRequest, PUBLIC, LOGIN } from './ratelimit.js';
 import { recordCheckin } from './checkin.js';
-import { today, classRoster, voidAttendance, memberHistory, awayList } from './staff.js';
+import { today, classRoster, voidAttendance, memberHistory, awayList, trends } from './staff.js';
 import { localParts, localDayBounds } from './time.js';
 
 /** Static files the Worker will hand to the assets binding. Everything else is 404. */
@@ -724,6 +724,11 @@ export function createApp(schedule, deps = defaultDeps(), opts = {}) {
               starting: body.starting === true,
               now: now(),
             }));
+          }
+
+          // ---- attendance trends (§15.6) ----
+          if (method === 'GET' && path === '/api/staff/trends') {
+            return json(await trends(env, schedule, now()));
           }
 
           // ---- away list (§15.5) ----
