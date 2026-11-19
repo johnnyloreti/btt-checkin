@@ -699,7 +699,7 @@ Johnny, after reviewing BJJLink: rank should show wherever staff look at a class
 
 **Recording, on the member screen.** Pick a belt and the stripes on it, two taps. A belt is a promotion: like a stripe it starts the next class interval. Ticking "They already hold this rank" records it as a starting rank (`starting = 1`) for a member who walked in with one: it sets what shows and leaves the class count alone. "Give a stripe now" records a stripe for anyone, eligible or not, because the instructor decides (§15.2). Undo removes the most recent row, as before.
 
-**Config in `wrangler.toml`:** `BELTS_KIDS` and `BELTS_ADULT`, in order. A member in a kids program is offered the kids list, anyone else the adult list, a member in both gets both. The lists ship as the IBJJF ones (13 kids belts; white, blue, purple, brown, black) and are unconfirmed for this gym: Johnny edits them if BTT Bridgewater uses fewer. Both blank turns belts off; stripes are unaffected.
+**Config in `wrangler.toml`:** `BELTS_KIDS` and `BELTS_ADULT`, in order. A member in a kids program is offered the kids list, anyone else the adult list, a member in both gets both. The lists are the IBJJF ones (13 kids belts; white, blue, purple, brown, black). Johnny confirmed on 2026-11-19 that the gym uses all 13 kids belts. Both blank turns belts off; stripes are unaffected.
 
 **Schema:** migration `src/db/migrations/006_belts.sql` adds `belt`, `stripes` and `starting` to `promotions`. Per the §15.1 rule, `hasBeltColumns` in `src/schema-caps.js` guards every query that names them: before the migration rank is hidden everywhere, a belt is refused with the filename, stripes keep working, and `/health` goes `ok: false` naming the file. Nothing on the check-in path reads these columns.
 
