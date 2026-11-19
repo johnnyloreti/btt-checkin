@@ -244,7 +244,9 @@ Johnny: "Propose a plan to continue the build and keep yourself busy." Six items
 
 **3. The kiosk updates itself (§2).** No more reloading the iPad after a deploy. It reloads only when nobody is at the screen, never on a wifi sign-in page, never offline. **The deploy that carries this still needs one last manual reload**, because the page on the iPad today does not have it yet.
 
-**4 and 5. Built, and switched off.** The Family box (§15.10) and a staff note on a member (§15.11). Both are V2 items you have not said yes to, so `FAMILY_VIEW` and `MEMBER_NOTES` ship `"off"` and a deploy changes nothing anyone sees. Say the word and each is a one-line change; the note also needs `src/db/migrations/008_member_notes.sql`.
+**4. The Family box (§15.10): on.** Built switched off; you approved it on 2026-11-19. Siblings and a training parent show together on a member's staff screen.
+
+**5. A staff note on a member (§15.11): built, stays off** by your choice the same day. To turn it on later: run `src/db/migrations/008_member_notes.sql` and set `MEMBER_NOTES = "on"`.
 
 **6. Handover, in `docs/handover/`.**
 - `progress-link-workflow-prompt.md`: paste into Claude in Chrome to build the "Check-In: Progress link" workflow.

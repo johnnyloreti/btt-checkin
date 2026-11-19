@@ -134,7 +134,7 @@ Kids 6-9  11:00 AM
 
 **Add a class** (on the member screen, added 2026-09-24) is the way in when one person was missed rather than a whole class: three taps instead of walking the date bar back and opening the class. Pick the day (the picker is bounded by `STAFF_BACKDATE_DAYS`, so it never offers a day the server would refuse), see only that member's classes for it, tap one. A class they are already on is marked, and tapping it anyway is a harmless duplicate. Open mat is always offered. If nothing in their program runs that day, that day's other classes are listed rather than none, because staff know better than the program tag does.
 
-No belt tracking, no notes, no billing in V1. Promotions since arrived as an approved V2 item (§15.2), belts as §15.4, the Away tab as §15.5, the Trends tab as §15.6, the progress page link as §15.7, and lesson notes with the Plan tab as §15.8. Members have their own way in at `/member` (§15.9).
+No belt tracking, no notes, no billing in V1. Promotions since arrived as an approved V2 item (§15.2), belts as §15.4, the Away tab as §15.5, the Trends tab as §15.6, the progress page link as §15.7, lesson notes with the Plan tab as §15.8, and the Family box as §15.10. Members have their own way in at `/member` (§15.9).
 
 ---
 
@@ -291,7 +291,7 @@ Vars in `wrangler.toml`:
 - `BELTS_KIDS`, `BELTS_ADULT` (§15.4 belt lists; both blank turns belts off) and `AWAY_DAYS` (§15.5; "0" turns the Away tab off)
 - `PROGRESS_PAGE`, `PROGRESS_FIELD` (§15.7; "off" removes the page, a blank field leaves staff with Copy link only) and `LESSON_NOTES` (§15.8; "off" hides lesson notes)
 - `MEMBER_NOTES` (§15.11; "on" shows a staff note on the member screen and needs migration 008; ships "off")
-- `FAMILY_VIEW` (§15.10; "on" shows the Family box on the staff member screen, anything else hides it; ships "off")
+- `FAMILY_VIEW = "on"` (§15.10; shows the Family box on the staff member screen, anything else hides it)
 - `WAIVER_TAG`, `WAIVER_FIELD` (§15.1), and `PAYER_FIELD`, `WAIVER_PAYER_FIELD` (§15.1 kids, Phase 1b; either blank sends every reminder to the member's own contact)
 
 `.dev.vars.example` committed; `.dev.vars` gitignored. Parser must handle CRLF and BOM.
@@ -788,9 +788,9 @@ What a right guess gets: one family's progress page, and the knowledge of a PIN 
 
 **Depends on Johnny's GHL workflow** "Check-In: Progress link" (§15.7) for the text link to arrive.
 
-### 15.10 Family box on the staff member screen (built 2026-11-19, **not yet approved, ships off**)
+### 15.10 Family box on the staff member screen (approved 2026-11-19)
 
-Johnny, going to bed on 2026-11-19: "Propose a plan to continue the build and keep yourself busy." Family view was on the plan Claude posted before starting. It is on the V2 list in §10, and Johnny has not said yes to it, so it is built and tested but **switched off**: `FAMILY_VIEW = "off"` in `wrangler.toml`. A deploy carries the code and changes nothing a person sees. When Johnny approves it, set it to `"on"` and change this heading to say approved, with the date. If he does not want it, the commit can be reverted on its own.
+Built overnight on 2026-11-19 from the plan Claude posted when Johnny said "Propose a plan to continue the build and keep yourself busy", and shipped switched off because family view was on the V2 list in §10. Johnny approved it the same day when asked which of the two switched-off features to turn on: "Family box only". `FAMILY_VIEW = "on"` in `wrangler.toml`; `"off"` hides it.
 
 **What it is.** A "Family" list on the staff member screen: the account holder if they train, and every member linked to the same parent through `payer_contact_id` (§15.1). Each row shows name, program, rank, classes in the last 30 days, the date of the last class, and tags for no waiver, inactive, parent and "this member". A tap on anyone else opens their screen. A member on their own has no list.
 
@@ -798,9 +798,9 @@ Johnny, going to bed on 2026-11-19: "Propose a plan to continue the build and ke
 
 **Rules it keeps.** Staff-only, read-only, no GHL call, no migration, nothing on the kiosk. Ids in the response are the kiosk's opaque ones; a contact id never leaves the Worker. Removed check-ins are not classes. Before migration 005 there are no links to read and the box is off; before 006 it lists without ranks. `src/family.js`, `test/family.test.js`.
 
-### 15.11 A staff note on a member (built 2026-11-19, **not yet approved, ships off**)
+### 15.11 A staff note on a member (built 2026-11-19, **not approved, stays off**)
 
-Same footing as §15.10: on the plan Claude posted when Johnny said to continue the build overnight, not something he has said yes to. §3 says no notes in V1. So it is built and tested and **switched off**: `MEMBER_NOTES = "off"`. While it is off nothing reads the table, the member screen is unchanged, and `/health` does not ask for the migration.
+Built overnight on 2026-11-19 from the same plan as §15.10. §3 says no notes in V1. Asked the same day which of the two to turn on, Johnny chose the Family box only, so this stays built, tested and **switched off**: `MEMBER_NOTES = "off"`. While it is off nothing reads the table, the member screen is unchanged, and `/health` does not ask for the migration.
 
 **Why this one in particular is Johnny's call.** It is free text about people, some of them children ("left knee, no takedowns", who collects a kid), kept in D1 behind the one shared four-digit staff PIN. That may be exactly what the front desk needs, or it may be something he would rather keep in GHL or not write down at all.
 

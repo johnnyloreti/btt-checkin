@@ -111,11 +111,10 @@ name = "LOGIN_LIMITER"
 namespace_id = "1002"
 simple = { limit = 5, period = 60 }
 
-# Family box on the staff member screen (§15.10). Built 2026-11-19 and left
-# off: family view is a V2 item and waits for Johnny's yes. "on" turns it on.
-FAMILY_VIEW = "off"
+# Family box on the staff member screen (§15.10). Approved by Johnny
+# 2026-11-19. "off" hides it.
+FAMILY_VIEW = "on"
 
-# A staff note on a member (§15.11). Built 2026-11-19 and left off: it is a
-# V2 item and waits for Johnny's yes. To turn it on, run migration 008 and
-# set this to "on".
+# A staff note on a member (§15.11). Built 2026-11-19. Johnny chose to leave
+# it off the same day. To turn it on, run migration 008 and set this to "on".
 MEMBER_NOTES = "off"
