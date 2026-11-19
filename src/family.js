@@ -95,7 +95,7 @@ export async function household(env, schedule, member, now = new Date()) {
       programLabels: r.programs.filter((p) => schedule.programs[p]).map((p) => schedule.programs[p].label),
       active: Number(r.active) === 1,
       waiver: showWaiver ? Number(r.waiver ?? 1) === 1 : null,
-      rank: rank ? { label: rank.label, stripes: rank.stripes } : null,
+      rank: rank ? { label: rank.label, stripes: rank.stripes, coloursText: rank.coloursText || '' } : null,
       lifetime: Number(a?.lifetime ?? 0),
       last30: Number(a?.last30 ?? 0),
       lastClass: a?.last ? String(a.last).slice(0, 10) : null,

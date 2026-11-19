@@ -289,6 +289,7 @@ Vars in `wrangler.toml`:
 - `ROLLUP_BATCH = "20"` (§6: contacts pushed to GHL per cron tick, capped at 40)
 - `TAB_ITEMS`, `TAB_PROGRAMS`, `TAB_MIN_CENTS`, `TAB_MAX_ROLL_DAYS`, `TAB_AUTO_HOUR` (§15.3 drink tab; empty `TAB_ITEMS` turns it off, empty `TAB_AUTO_HOUR` makes charging button-only)
 - `BELTS_KIDS`, `BELTS_ADULT` (§15.4 belt lists; both blank turns belts off) and `AWAY_DAYS` (§15.5; "0" turns the Away tab off)
+- `KIDS_STRIPES = "ibjjf-monthly"` (§15.12: kids' stripes are the eleven coloured monthly degrees; "plain" turns that off)
 - `PROGRESS_PAGE`, `PROGRESS_FIELD` (§15.7; "off" removes the page, a blank field leaves staff with Copy link only) and `LESSON_NOTES` (§15.8; "off" hides lesson notes)
 - `MEMBER_NOTES` (§15.11; "on" shows a staff note on the member screen and needs migration 008; ships "off")
 - `FAMILY_VIEW = "on"` (§15.10; shows the Family box on the staff member screen, anything else hides it)
@@ -811,3 +812,31 @@ Built overnight on 2026-11-19 from the same plan as §15.10. §3 says no notes i
 **To turn it on:** run `src/db/migrations/008_member_notes.sql`, set `MEMBER_NOTES = "on"`, deploy, and change this heading to say approved. Switched on before the migration, the box stays hidden, a save is refused naming the file, and `/health` goes `ok: false` naming it (`hasMemberNotesTable` in `src/schema-caps.js`).
 
 **Route (PIN):** `POST /api/staff/member/note { contactId, body }`. `GET /api/staff/member` carries `note`. `src/notes.js`.
+
+### 15.12 Kids' coloured stripes, the IBJJF monthly system (approved 2026-11-19)
+
+Johnny: "We also follow the monthly stripe ibjjf system for kids stripes where they get colored stripes."
+
+**The system.** Eleven degrees on each kids belt, and the twelfth is the next belt. The belt never carries more than four stripes; the colours say which degree it is.
+
+| Degree | On the belt |
+|---|---|
+| 1 to 4 | one to four white |
+| 5 to 8 | a red stripe takes the place of a white one each time: 1 red 3 white, 2 red 2 white, 3 red 1 white, 4 red |
+| 9 to 11 | a yellow stripe takes the place of a red one each time: 1 yellow 3 red, 2 yellow 2 red, 3 yellow 1 red |
+| 12 | the next belt in `BELTS_KIDS`, starting again at no stripes |
+
+**Where this came from, and what is not verified.** `ibjjf.com` cannot be reached from this container, so the counts (four white, four red, three yellow, eleven in all, twelfth is the belt) come from secondary write-ups of the IBJJF monthly graduation document. That red and yellow *replace* earlier stripes, so the belt never shows more than four, is the reading of "red stripes over the white ones" in those write-ups, not something read from the IBJJF chart itself. One write-up says the last three stripes take the colour of the next belt instead of yellow. **If the gym does either differently, `degreeStripes` in `src/promotions.js` is the one function to change.**
+
+**What triggers a stripe is unchanged.** "Monthly" is the IBJJF's name for the system. Here a kid still comes up for review every `STRIPE_CLASSES` (7) classes (§15.2), which at two classes a week is about a month. Johnny has not asked for a calendar rule.
+
+**Who it applies to.** A member in a kids program whose belt is on the kids list, the white belt included. Adults are untouched: plain stripes, no ceiling (black belt degrees go past four). A teen in both programs holding an adult belt is on the adult system.
+
+**Where it shows.**
+- **Staff, everywhere rank shows** (roster, Stripes tab, member screen, Family box): "Grey belt, 6 stripes (2 red, 2 white)".
+- **Belt form on the member screen:** a kid is offered none to eleven stripes, each named by its colours.
+- **Progress page (§15.7):** the belt is drawn with its stripes in their colours, never more than four.
+
+**The twelfth is the belt.** A kid on eleven stripes cannot be given another: the server refuses with what comes next, "Give a stripe now" is hidden, and the member screen says "Eleven stripes. The next step is the Grey-black belt." On the Stripes tab their row reads "belt next" and the button records that belt, two taps like every other write. On the last kids belt there is nothing to record from there.
+
+**Config:** `KIDS_STRIPES = "ibjjf-monthly"`; `"plain"` puts kids back on plain stripes. No migration: the degree is the stripe count already stored (§15.4). Before migration 006 stripes record as before with no ceiling, because without the belt columns there is no rank to count on. `test/belts.test.js`.

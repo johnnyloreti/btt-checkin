@@ -86,6 +86,7 @@
   // Belt colours. A two-part belt ("grey-white") is the first colour with a
   // stripe of the second along the middle. An unknown belt draws plain.
   const COLOURS = { white: '#f4f1e9', grey: '#8f9296', yellow: '#e9c838', orange: '#e2792b', green: '#2f8f4e', blue: '#2b62c9', purple: '#6c41b5', brown: '#6d4426', black: '#141414' };
+  const STRIPES = { white: '#f4f1e9', red: '#d5202f', yellow: '#f2c230' };
   function beltGraphic(rank) {
     const [base, mid] = String(rank.belt).split('-');
     const belt = el('div', 'belt');
@@ -98,7 +99,14 @@
     // The rank bar: black, or red on a black belt, with the stripes on it.
     const bar = el('div', 'bar');
     bar.style.background = base === 'black' ? '#b3261e' : '#141414';
-    for (let i = 0; i < Math.min(rank.stripes, 6); i += 1) bar.appendChild(el('i'));
+    // Kids carry coloured stripes, never more than four (the monthly
+    // degrees: white, then red, then yellow). Anyone else carries white ones.
+    const colours = Array.isArray(rank.colours) ? rank.colours : Array(Math.min(rank.stripes, 6)).fill('white');
+    for (const c of colours) {
+      const stripe = el('i');
+      stripe.style.background = STRIPES[c] || STRIPES.white;
+      bar.appendChild(stripe);
+    }
     belt.appendChild(bar);
     return belt;
   }

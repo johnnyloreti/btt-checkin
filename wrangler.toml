@@ -39,6 +39,11 @@ STRIPE_PROGRAMS = "kids-3-5,kids-6-9,kids-10-14"
 BELTS_KIDS = "white,grey-white,grey,grey-black,yellow-white,yellow,yellow-black,orange-white,orange,orange-black,green-white,green,green-black"
 BELTS_ADULT = "white,blue,purple,brown,black"
 
+# Kids' stripes (§15.12). "ibjjf-monthly": eleven coloured degrees on each
+# kids belt (four white, four red, three yellow) and the twelfth is the next
+# belt. "plain" puts kids back on plain stripes with no ceiling.
+KIDS_STRIPES = "ibjjf-monthly"
+
 # Away list (§15.5). Days without a class before a member shows on the staff
 # Away tab. "0" turns the list off.
 AWAY_DAYS = "14"

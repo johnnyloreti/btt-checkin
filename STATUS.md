@@ -253,6 +253,16 @@ Johnny: "Propose a plan to continue the build and keep yourself busy." Six items
 - `member-page-poster.pdf`: a Letter-size poster with a QR code for `checkin.bttbridgewater.com/member`. Put it up after the deploy and after that workflow is published, or "Text me my link" will promise a text that does not come.
 - `whats-new-for-staff.pdf`: one page for the desk and the coaches.
 
+## Kids' coloured stripes, 2026-11-19 (§15.12)
+
+You said the gym follows the IBJJF monthly system for kids. Built: eleven degrees on each kids belt, four white, then red replacing white one at a time, then yellow replacing red, and the twelfth is the next belt. Staff see "Grey belt, 6 stripes (2 red, 2 white)" wherever rank shows; the belt form offers a kid none to eleven by colour; the progress page draws the stripes in colour. A kid on eleven cannot be given a twelfth stripe: the Stripes tab offers the next belt instead.
+
+Two things to check against how you actually do it, because the IBJJF site could not be opened from here and this is from write-ups of it:
+- **The belt never shows more than four stripes** (red replaces white, yellow replaces red). If you add stripes instead of replacing, say so.
+- **The last three are yellow.** One write-up says they take the colour of the next belt.
+
+A stripe still comes up for review every 7 classes, not by the calendar. No migration.
+
 ## Still open after go-live
 
 - Rotate `STAFF_PIN`; the first one was pasted into a chat.

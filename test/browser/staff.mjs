@@ -770,6 +770,68 @@ await step('member page: pick a name, a wrong PIN, the right PIN, remembered on 
   await phoneCtx.close();
 });
 
+await step('kids stripes: the monthly colours on the member screen and the progress page, and the twelfth is the belt', async () => {
+  await page.click('.tab[data-tab="members"]');
+  await page.fill('#member-search', 'jack');
+  await page.waitForSelector('#member-tiles .tile');
+  await page.click('#member-tiles .tile:has-text("Jack Silva")');
+  await page.waitForFunction(() => document.getElementById('member').classList.contains('active') && document.getElementById('member-title').textContent === 'Jack Silva');
+
+  // A kid is offered none to eleven, each named by its colours.
+  assert.equal(await page.locator('#rank-stripes option').count(), 12);
+  assert.equal(await page.locator('#rank-stripes option').nth(0).textContent(), 'No stripes');
+  assert.equal(await page.locator('#rank-stripes option').nth(6).textContent(), '6 stripes (2 red, 2 white)');
+  assert.equal(await page.locator('#rank-stripes option').nth(11).textContent(), '11 stripes (3 yellow, 1 red)');
+  const setStripes = async (n) => {
+    await page.selectOption('#rank-belt', 'grey');
+    await page.selectOption('#rank-stripes', String(n));
+    await page.check('#rank-held');
+    await page.click('#rank-save');
+    await page.click('#rank-save');
+  };
+  await setStripes(6);
+  await page.waitForFunction(() => /Grey belt, 6 stripes \(2 red, 2 white\)/.test(document.getElementById('member-facts').textContent));
+  assert.equal(await page.locator('#member-stripe').isVisible(), true);
+  await page.screenshot({ path: join(OUT, 'staff-member-coloured-stripes.png') });
+
+  // The progress page draws the four stripes in their colours.
+  const phoneCtx = await browser.newContext({ ...devices['iPhone 13'], deviceScaleFactor: 1 });
+  const me = await phoneCtx.newPage();
+  await me.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
+  await me.goto(`${base}/me?t=${await progressToken('c_jack', env.ID_SALT)}`);
+  await me.waitForSelector('.card');
+  const drawn = await me.locator('.belt .bar i').evaluateAll((els) => els.map((e) => getComputedStyle(e).backgroundColor));
+  assert.equal(drawn.length, 4, 'never more than four on the belt');
+  assert.equal(new Set(drawn.slice(0, 2)).size, 1);
+  assert.equal(new Set(drawn.slice(2)).size, 1);
+  assert.notEqual(drawn[0], drawn[2], 'two red, then two white');
+  assert.match(await me.locator('.rank .label').textContent(), /Grey belt, 6 stripes/);
+  await me.screenshot({ path: join(OUT, 'me-coloured-stripes.png') });
+  await phoneCtx.close();
+
+  // On eleven there is no twelfth stripe to give: the page says what is next.
+  await setStripes(11);
+  await page.waitForFunction(() => /11 stripes \(3 yellow, 1 red\)/.test(document.getElementById('member-facts').textContent));
+  assert.equal(await page.locator('#member-stripe').isVisible(), false);
+  assert.match(await page.locator('#rank-next').textContent(), /Eleven stripes\. The next step is the Grey-black belt\./);
+
+  // Seven more classes make him eligible again. The Stripes tab offers the belt, not a stripe.
+  const ins = env.DB.raw.prepare("INSERT INTO attendance (ghl_contact_id, class_name, class_start_local, checked_in_at, method) VALUES ('c_jack', 'Kids 6-9', ?, ?, 'staff')");
+  for (let i = 1; i <= 7; i += 1) ins.run(`2026-07-0${i}T09:09`, `2026-07-0${i}T13:09:00Z`);
+  await page.click('.tab[data-tab="stripes"]');
+  const row = page.locator('#stripes-list .row', { hasText: 'Jack Silva' });
+  await row.waitFor();
+  assert.match(await row.textContent(), /belt next/);
+  const button = row.locator('.award');
+  assert.equal(await button.textContent(), 'Record Grey-black belt');
+  await button.click();
+  assert.equal(await button.textContent(), 'Confirm Grey-black belt');
+  await button.click();
+  await page.waitForFunction(() => /Grey-black belt recorded for Jack/.test(document.getElementById('toast').textContent));
+  const last = env.DB.raw.prepare("SELECT kind, belt, stripes, starting FROM promotions WHERE ghl_contact_id = 'c_jack' ORDER BY id DESC LIMIT 1").get();
+  assert.deepEqual([last.kind, last.belt, last.stripes, last.starting], ['belt', 'grey-black', 0, 0]);
+});
+
 await step('sign out returns to the login page', async () => {
   await page.click('#signout');
   await page.waitForSelector('#pin');

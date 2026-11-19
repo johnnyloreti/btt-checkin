@@ -113,7 +113,7 @@ test('a member sees their own count, week, month, streak, milestone and recent c
     ['2026-09-12', 'Kids 6-9', '11:00'],
     ['2026-08-20', 'Kids 6-9', '16:30'],
   ]);
-  assert.deepEqual(jack.rank, { belt: 'white', label: 'White belt', stripes: 0 });
+  assert.deepEqual(jack.rank, { belt: 'white', label: 'White belt', stripes: 0, colours: [] });
   const text = JSON.stringify(body);
   assert.doesNotMatch(text, /c_jack|ghl_contact_id|payer/, 'no contact ids');
   assert.doesNotMatch(text, /tab|waiver|balance|billing|@/i, 'nothing about money, waivers or contact details');
@@ -132,7 +132,7 @@ test('recent classes stop at ten, newest first', async () => {
 test('rank follows the belt record, and is left off before migration 006', async () => {
   const ready = await setup();
   ready.DB.raw.prepare("INSERT INTO promotions (ghl_contact_id, kind, awarded_on, at_class_count, created_at, belt, stripes) VALUES ('c_jack', 'belt', '2026-09-01', 0, '2026-09-01T00:00:00Z', 'grey', 2)").run();
-  assert.deepEqual((await (await ready.page('c_jack')).json()).people[0].rank, { belt: 'grey', label: 'Grey belt', stripes: 2 });
+  assert.deepEqual((await (await ready.page('c_jack')).json()).people[0].rank, { belt: 'grey', label: 'Grey belt', stripes: 2, colours: ['white', 'white'] });
 
   const pending = await setup({ noBelt: true });
   const res = await pending.page('c_jack');

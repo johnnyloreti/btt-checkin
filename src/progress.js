@@ -143,7 +143,7 @@ export async function personProgress(env, schedule, member, rank, now) {
     last30: dates.filter((d) => d >= since30 && d <= today).length,
     streakWeeks: weekStreak(dates, today),
     nextMilestone: nextMilestone(lifetime),
-    rank: rank ? { belt: rank.belt, label: rank.label, stripes: rank.stripes } : null,
+    rank: rank ? { belt: rank.belt, label: rank.label, stripes: rank.stripes, colours: rank.colours || null } : null,
     recent: results.slice(0, RECENT_CLASSES).map((r) => ({
       date: String(r.class_start_local).slice(0, 10),
       className: r.class_name === UNSCHEDULED_CLASS ? 'Open mat' : r.class_name,

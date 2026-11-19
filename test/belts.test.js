@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp, health } from '../src/app.js';
 import { syncRoster } from '../src/roster.js';
-import { beltConfig, beltsEnabled, beltOptionsFor, beltLabel, rankFrom, DEFAULT_BELTS_KIDS, DEFAULT_BELTS_ADULT } from '../src/promotions.js';
+import { beltConfig, beltsEnabled, beltOptionsFor, beltLabel, rankFrom, degreeStripes, degreeText, kidsStripesMonthly, KIDS_DEGREES, DEFAULT_BELTS_KIDS, DEFAULT_BELTS_ADULT } from '../src/promotions.js';
 import { hasBeltColumns, resetSchemaCaps } from '../src/schema-caps.js';
 import { loadSchedule } from '../src/schedule.js';
 import { opaqueId } from '../src/ids.js';
@@ -52,13 +52,24 @@ async function setup({ noBelt = false, extraEnv = {} } = {}) {
   return { env, DB, call, give, promote, member, id: (c) => opaqueId(c, SALT) };
 }
 
+// A kid's rank on the monthly degrees (§15.12), as the API returns it.
+const BELT = (key) => `${key.charAt(0).toUpperCase()}${key.slice(1)} belt`;
+function kidRank(belt, stripes, recorded) {
+  const next = DEFAULT_BELTS_KIDS[DEFAULT_BELTS_KIDS.indexOf(belt) + 1] || null;
+  return {
+    belt, label: BELT(belt), stripes, recorded,
+    maxStripes: 11, colours: degreeStripes(stripes), coloursText: degreeText(stripes), full: stripes >= 11,
+    nextBelt: next, nextLabel: next ? BELT(next) : null,
+  };
+}
+
 // ---------- pure ----------
 
 test('beltConfig: defaults when unset, a blank list is empty, both blank is off', () => {
-  assert.deepEqual(beltConfig({}), { kids: DEFAULT_BELTS_KIDS, adult: DEFAULT_BELTS_ADULT });
+  assert.deepEqual(beltConfig({}), { kids: DEFAULT_BELTS_KIDS, adult: DEFAULT_BELTS_ADULT, kidsMonthly: true });
   assert.equal(DEFAULT_BELTS_KIDS[0], 'white');
   assert.deepEqual(DEFAULT_BELTS_ADULT, ['white', 'blue', 'purple', 'brown', 'black']);
-  assert.deepEqual(beltConfig({ BELTS_KIDS: ' White , Grey ', BELTS_ADULT: '' }), { kids: ['white', 'grey'], adult: [] });
+  assert.deepEqual(beltConfig({ BELTS_KIDS: ' White , Grey ', BELTS_ADULT: '', KIDS_STRIPES: 'plain' }), { kids: ['white', 'grey'], adult: [], kidsMonthly: false });
   assert.equal(beltsEnabled({}), true);
   assert.equal(beltsEnabled({ BELTS_KIDS: '', BELTS_ADULT: 'white' }), true);
   assert.equal(beltsEnabled({ BELTS_KIDS: '', BELTS_ADULT: '' }), false);
@@ -124,7 +135,7 @@ test('a belt promotion starts a new stripe interval; a rank already held does no
   const again = (await (await call('/api/staff/stripes')).json()).rows[0];
   assert.equal(again.since, 7);
   assert.equal(again.lastKind, 'belt');
-  assert.deepEqual(again.rank, { belt: 'grey-black', label: 'Grey-black belt', stripes: 0, recorded: true }, 'rank rides along on the stripe list');
+  assert.deepEqual(again.rank, kidRank('grey-black', 0, true), 'rank rides along on the stripe list');
 });
 
 test('member lookup carries rank, the belts on offer, and belt history', async () => {
@@ -132,19 +143,19 @@ test('member lookup carries rank, the belts on offer, and belt history', async (
   give('c_jack', 9);
   let m = await member('c_jack');
   assert.equal(m.rank.enabled, true);
-  assert.deepEqual(m.rank.rank, { belt: 'white', label: 'White belt', stripes: 0, recorded: false }, 'white until told otherwise');
+  assert.deepEqual(m.rank.rank, kidRank('white', 0, false), 'white until told otherwise');
   assert.deepEqual(m.rank.options.map((o) => o.key), DEFAULT_BELTS_KIDS);
   assert.equal(m.rank.options[1].label, 'Grey-white belt');
   assert.equal(m.canRecordStripe, true);
 
   await promote('c_jack', { kind: 'stripe' });
   await promote('c_jack', { kind: 'stripe' });
-  assert.deepEqual((await member('c_jack')).rank.rank, { belt: 'white', label: 'White belt', stripes: 2, recorded: false });
+  assert.deepEqual((await member('c_jack')).rank.rank, kidRank('white', 2, false));
 
   await promote('c_jack', { kind: 'belt', belt: 'grey-white' });
   await promote('c_jack', { kind: 'stripe' });
   m = await member('c_jack');
-  assert.deepEqual(m.rank.rank, { belt: 'grey-white', label: 'Grey-white belt', stripes: 1, recorded: true });
+  assert.deepEqual(m.rank.rank, kidRank('grey-white', 1, true));
   assert.deepEqual(m.promotions.map((p) => [p.kind, p.beltLabel, p.starting]), [['stripe', null, false], ['belt', 'Grey-white belt', false], ['stripe', null, false], ['stripe', null, false]]);
 
   // An adult gets the adult list.
@@ -226,4 +237,91 @@ test('after migration 006, /health has no belt complaint', async () => {
   const { env } = await setup();
   const h = await health(env, schedule, NOW);
   assert.doesNotMatch(JSON.stringify(h), /006_belts/);
+});
+
+// ---------- kids' coloured stripes: the IBJJF monthly system (§15.12) ----------
+
+test('the eleven degrees: four white, then red takes the place of white, then yellow takes the place of red', () => {
+  assert.equal(KIDS_DEGREES, 11);
+  const W = 'white'; const R = 'red'; const Y = 'yellow';
+  assert.deepEqual([0, 1, 2, 3, 4].map(degreeStripes), [[], [W], [W, W], [W, W, W], [W, W, W, W]]);
+  assert.deepEqual([5, 6, 7, 8].map(degreeStripes), [[R, W, W, W], [R, R, W, W], [R, R, R, W], [R, R, R, R]]);
+  assert.deepEqual([9, 10, 11].map(degreeStripes), [[Y, R, R, R], [Y, Y, R, R], [Y, Y, Y, R]]);
+  for (let d = 0; d <= 11; d += 1) assert.ok(degreeStripes(d).length <= 4, 'never more than four on the belt');
+  // Past eleven the belt cannot show more; it stays on the eleventh.
+  assert.deepEqual(degreeStripes(14), degreeStripes(11));
+  assert.deepEqual(degreeStripes(-2), []);
+  assert.deepEqual([0, 3, 6, 8, 11].map(degreeText), ['', '3 white', '2 red, 2 white', '4 red', '3 yellow, 1 red']);
+});
+
+test('the monthly system is on unless KIDS_STRIPES says plain', () => {
+  assert.equal(kidsStripesMonthly({}), true);
+  assert.equal(kidsStripesMonthly({ KIDS_STRIPES: 'ibjjf-monthly' }), true);
+  for (const v of ['plain', 'PLAIN', 'off', '0', 'false']) assert.equal(kidsStripesMonthly({ KIDS_STRIPES: v }), false, v);
+});
+
+test('rank: a kid carries colours and what comes next; an adult, and a kid under plain stripes, do not', () => {
+  const cfg = beltConfig({});
+  const six = rankFrom([{ kind: 'belt', belt: 'grey', stripes: 4 }, { kind: 'stripe' }, { kind: 'stripe' }], ['kids-6-9'], cfg);
+  assert.deepEqual(six, kidRank('grey', 6, true));
+  assert.equal(six.coloursText, '2 red, 2 white');
+  assert.equal(six.nextLabel, 'Grey-black belt');
+  // The last kids belt has nothing after it.
+  const top = rankFrom([{ kind: 'belt', belt: 'green-black', stripes: 11 }], ['kids-10-14'], cfg);
+  assert.deepEqual([top.full, top.nextBelt, top.nextLabel], [true, null, null]);
+  // Adults: plain stripes, exactly as before.
+  assert.deepEqual(rankFrom([{ kind: 'belt', belt: 'blue', stripes: 3 }], ['adult'], cfg), { belt: 'blue', label: 'Blue belt', stripes: 3, recorded: true });
+  // A teen in both programs who holds an adult belt is on the adult system.
+  assert.equal(rankFrom([{ kind: 'belt', belt: 'blue', stripes: 1 }], ['kids-10-14', 'adult'], cfg).colours, undefined);
+  // Switched to plain, a kid is as before too.
+  assert.deepEqual(rankFrom([{ kind: 'stripe' }], ['kids-6-9'], beltConfig({ KIDS_STRIPES: 'plain' })), { belt: 'white', label: 'White belt', stripes: 1, recorded: false });
+});
+
+test('the member screen offers a kid none to eleven stripes, named by colour; an adult gets no such list', async () => {
+  const { member } = await setup();
+  const jack = await member('c_jack');
+  assert.equal(jack.rank.maxStripes, 11);
+  assert.equal(jack.rank.stripeOptions.length, 12);
+  assert.deepEqual(jack.rank.stripeOptions[0], { value: 0, label: 'No stripes' });
+  assert.deepEqual(jack.rank.stripeOptions[1], { value: 1, label: '1 stripe (1 white)' });
+  assert.deepEqual(jack.rank.stripeOptions[6], { value: 6, label: '6 stripes (2 red, 2 white)' });
+  assert.deepEqual(jack.rank.stripeOptions[11], { value: 11, label: '11 stripes (3 yellow, 1 red)' });
+  const dan = await member('c_dan');
+  assert.equal(dan.rank.stripeOptions, null);
+});
+
+test('the twelfth is the belt: a kid on eleven stripes cannot be given another, and is told what comes next', async () => {
+  const { promote, member, DB } = await setup();
+  assert.equal((await promote('c_jack', { kind: 'belt', belt: 'grey', stripes: 10, starting: true })).status, 200);
+  assert.equal((await promote('c_jack', { kind: 'stripe' })).status, 200);
+  let jack = await member('c_jack');
+  assert.deepEqual([jack.rank.rank.stripes, jack.rank.rank.full, jack.rank.rank.coloursText], [11, true, '3 yellow, 1 red']);
+
+  const twelfth = await promote('c_jack', { kind: 'stripe' });
+  assert.equal(twelfth.status, 409);
+  assert.match((await twelfth.json()).error, /already on 11 stripes: the next step is the Grey-black belt/);
+  assert.equal(DB.raw.prepare("SELECT COUNT(*) AS n FROM promotions WHERE kind = 'stripe'").get().n, 1, 'nothing was written');
+
+  // The belt is recorded as a belt, and the stripes start again.
+  assert.equal((await promote('c_jack', { kind: 'belt', belt: 'grey-black' })).status, 200);
+  jack = await member('c_jack');
+  assert.deepEqual([jack.rank.rank.belt, jack.rank.rank.stripes, jack.rank.rank.full], ['grey-black', 0, false]);
+  assert.equal((await promote('c_jack', { kind: 'stripe' })).status, 200);
+});
+
+test('a kids belt takes at most eleven stripes; an adult belt, and plain stripes, keep the old limit', async () => {
+  const { promote } = await setup();
+  const over = await promote('c_jack', { kind: 'belt', belt: 'grey', stripes: 12 });
+  assert.equal(over.status, 400);
+  assert.match((await over.json()).error, /from 0 to 11/);
+  assert.equal((await promote('c_jack', { kind: 'belt', belt: 'grey', stripes: 11 })).status, 200);
+  assert.equal((await promote('c_dan', { kind: 'belt', belt: 'black', stripes: 6 })).status, 200, 'black belt degrees go past four');
+  const plain = await setup({ extraEnv: { KIDS_STRIPES: 'plain' } });
+  assert.equal((await plain.promote('c_jack', { kind: 'belt', belt: 'grey', stripes: 12 })).status, 200);
+  for (let i = 0; i < 2; i += 1) assert.equal((await plain.promote('c_jack', { kind: 'stripe' })).status, 200, 'no ceiling on plain stripes');
+});
+
+test('before migration 006 a stripe still records for anyone, however many they have', async () => {
+  const { promote } = await setup({ noBelt: true });
+  for (let i = 0; i < 13; i += 1) assert.equal((await promote('c_jack', { kind: 'stripe' })).status, 200);
 });

@@ -874,6 +874,7 @@ export function createApp(schedule, deps = defaultDeps(), opts = {}) {
               belt: body.belt,
               stripes: body.stripes,
               starting: body.starting === true,
+              programs: memberPrograms(member),
               now: now(),
             }));
           }

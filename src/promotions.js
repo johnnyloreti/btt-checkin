@@ -46,7 +46,51 @@ export const MAX_STRIPES = 12;
 /** The two belt lists. An unset var uses the default; a blank one is empty. */
 export function beltConfig(env = {}) {
   const list = (raw, fallback) => (raw === undefined || raw === null ? fallback : parseList(raw));
-  return { kids: list(env.BELTS_KIDS, DEFAULT_BELTS_KIDS), adult: list(env.BELTS_ADULT, DEFAULT_BELTS_ADULT) };
+  return {
+    kids: list(env.BELTS_KIDS, DEFAULT_BELTS_KIDS),
+    adult: list(env.BELTS_ADULT, DEFAULT_BELTS_ADULT),
+    kidsMonthly: kidsStripesMonthly(env),
+  };
+}
+
+// ---------- kids' coloured stripes (§15.12) ----------
+// The IBJJF monthly system, which this gym follows for kids (Johnny,
+// 2026-11-19): eleven degrees on each kids belt, and the twelfth is the next
+// belt. The belt never carries more than four stripes; the colours say which
+// degree it is.
+//    1 to 4   white stripes, one more each time
+//    5 to 8   a red stripe takes the place of a white one each time
+//    9 to 11  a yellow stripe takes the place of a red one each time
+// So degree 6 is two red and two white, and degree 11 is three yellow and
+// one red. Adults are untouched: plain stripes, as before.
+export const KIDS_DEGREES = 11;
+
+/** KIDS_STRIPES = "plain" (or "off") keeps kids on plain stripes. Anything else is the monthly system. */
+export function kidsStripesMonthly(env = {}) {
+  const v = String(env.KIDS_STRIPES ?? 'ibjjf-monthly').trim().toLowerCase();
+  return v !== 'plain' && v !== 'off' && v !== '0' && v !== 'false';
+}
+
+/** The stripes on the belt for a degree, as colours, newest colour first. */
+export function degreeStripes(degree) {
+  const d = Math.max(0, Math.min(KIDS_DEGREES, Math.floor(Number(degree) || 0)));
+  if (d <= 4) return Array(d).fill('white');
+  if (d <= 8) return [...Array(d - 4).fill('red'), ...Array(8 - d).fill('white')];
+  return [...Array(d - 8).fill('yellow'), ...Array(12 - d).fill('red')];
+}
+
+/** "2 red, 2 white" for a degree; '' for none. */
+export function degreeText(degree) {
+  const counts = new Map();
+  for (const c of degreeStripes(degree)) counts.set(c, (counts.get(c) || 0) + 1);
+  return [...counts].map(([c, n]) => `${n} ${c}`).join(', ');
+}
+
+/** True when this member's rank runs on the kids' monthly degrees. */
+function onKidsDegrees(programs, belt, cfg) {
+  if (!cfg.kidsMonthly || !belt) return false;
+  const kid = (Array.isArray(programs) ? programs : []).some((p) => String(p).toLowerCase().startsWith('kids-'));
+  return kid && cfg.kids.includes(belt);
 }
 
 /** Both lists blank turns belt tracking off. */
@@ -96,7 +140,21 @@ export function rankFrom(promos, programs, cfg) {
     }
   }
   if (!belt) return null;
-  return { belt, label: `${beltLabel(belt)} belt`, stripes, recorded };
+  const rank = { belt, label: `${beltLabel(belt)} belt`, stripes, recorded };
+  if (onKidsDegrees(programs, belt, cfg)) {
+    // Kids (§15.12): the colours on the belt, and what comes after the
+    // eleventh degree. `stripes` stays the true count, even past eleven.
+    const next = cfg.kids[cfg.kids.indexOf(belt) + 1] || null;
+    Object.assign(rank, {
+      maxStripes: KIDS_DEGREES,
+      colours: degreeStripes(stripes),
+      coloursText: degreeText(stripes),
+      full: stripes >= KIDS_DEGREES,
+      nextBelt: next,
+      nextLabel: next ? `${beltLabel(next)} belt` : null,
+    });
+  }
+  return rank;
 }
 
 /** Whether rank can be shown at all: feature on, table and columns present. */
@@ -249,7 +307,7 @@ export async function stripeCandidates(env) {
  * A belt row (§15.4) also carries the belt, the stripes already on it, and
  * `starting` for a rank the member held before it was recorded here.
  */
-export async function recordPromotion(env, schedule, { contactId, kind = 'stripe', note = null, belt = null, stripes = 0, starting = false, now = new Date() }) {
+export async function recordPromotion(env, schedule, { contactId, kind = 'stripe', note = null, belt = null, stripes = 0, starting = false, programs = [], now = new Date() }) {
   if (!KINDS.includes(kind)) throw Object.assign(new Error(`kind must be one of ${KINDS.join(', ')}`), { status: 400 });
   if (!(await hasPromotionsTable(env))) {
     throw Object.assign(new Error('promotions table missing: run src/db/migrations/003_promotions.sql'), { status: 503 });
@@ -265,8 +323,17 @@ export async function recordPromotion(env, schedule, { contactId, kind = 'stripe
     beltKey = String(belt || '').trim().toLowerCase();
     if (![...cfg.kids, ...cfg.adult].includes(beltKey)) throw Object.assign(new Error('unknown belt'), { status: 400 });
     onBelt = Number(stripes ?? 0);
-    if (!Number.isInteger(onBelt) || onBelt < 0 || onBelt > MAX_STRIPES) {
-      throw Object.assign(new Error(`stripes must be a whole number from 0 to ${MAX_STRIPES}`), { status: 400 });
+    const most = onKidsDegrees(programs, beltKey, cfg) ? KIDS_DEGREES : MAX_STRIPES;
+    if (!Number.isInteger(onBelt) || onBelt < 0 || onBelt > most) {
+      throw Object.assign(new Error(`stripes must be a whole number from 0 to ${most}`), { status: 400 });
+    }
+  } else if (await hasBeltColumns(env)) {
+    // A kid on eleven stripes has nowhere to put a twelfth (§15.12): the
+    // next step is the belt, which staff record as a belt.
+    const rank = (await ranksFor(env, [{ ghl_contact_id: contactId, programs }])).get(contactId);
+    if (rank && rank.full) {
+      const what = rank.nextLabel ? `the next step is the ${rank.nextLabel}` : 'that is the top of the kids belts';
+      throw Object.assign(new Error(`already on ${KIDS_DEGREES} stripes: ${what}`), { status: 409 });
     }
   }
   const count = await env.DB.prepare(
@@ -346,10 +413,23 @@ export async function memberRank(env, member) {
   }
   const cfg = beltConfig(env);
   const ranks = await ranksFor(env, [{ ghl_contact_id: member.ghl_contact_id, programs }]);
+  const rank = ranks.get(member.ghl_contact_id) || null;
+  const options = beltOptionsFor(programs, cfg);
+  // The stripes the form offers. For a kid on the monthly degrees (§15.12):
+  // none to eleven, each named by its colours. Otherwise null, and the page
+  // offers plain stripes as before.
+  const kid = options.some((key) => onKidsDegrees(programs, key, cfg));
+  const stripeOptions = kid
+    ? Array.from({ length: KIDS_DEGREES + 1 }, (_, i) => ({
+      value: i,
+      label: i === 0 ? 'No stripes' : `${i} stripe${i === 1 ? '' : 's'} (${degreeText(i)})`,
+    }))
+    : null;
   return {
     enabled: true,
-    rank: ranks.get(member.ghl_contact_id) || null,
-    options: beltOptionsFor(programs, cfg).map((key) => ({ key, label: `${beltLabel(key)} belt` })),
-    maxStripes: MAX_STRIPES,
+    rank,
+    options: options.map((key) => ({ key, label: `${beltLabel(key)} belt` })),
+    maxStripes: kid ? KIDS_DEGREES : MAX_STRIPES,
+    stripeOptions,
   };
 }

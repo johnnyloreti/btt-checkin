@@ -239,6 +239,7 @@
         <button class="award" id="rank-save" type="button">Record belt</button>
       </div>
     </div>
+    <div id="rank-next" class="status" style="display:none;margin:0 0 10px;color:var(--gold)"></div>
     <div id="member-stripe" class="list" style="display:none;margin-bottom:10px">
       <div class="row"><span class="name">Give a stripe now</span><button class="award" id="stripe-add" type="button">Record stripe</button></div>
     </div>
@@ -319,9 +320,13 @@
     return e;
   }
   // "Grey belt, 2 stripes". Empty when rank is not shown (§15.4).
+  // "Grey belt, 6 stripes (2 red, 2 white)". The colours are the kids'
+  // monthly degrees (§15.12); an adult's rank has none and reads as before.
   function rankText(rank) {
     if (!rank) return '';
-    return `${rank.label}${rank.stripes ? `, ${rank.stripes} stripe${rank.stripes === 1 ? '' : 's'}` : ''}`;
+    const stripes = rank.stripes ? `, ${rank.stripes} stripe${rank.stripes === 1 ? '' : 's'}` : '';
+    const colours = rank.stripes && rank.coloursText ? ` (${rank.coloursText})` : '';
+    return `${rank.label}${stripes}${colours}`;
   }
   function showView(id) {
     for (const v of document.querySelectorAll('.view')) v.classList.toggle('active', v.id === id);
@@ -523,18 +528,31 @@
       );
       if (r.rank) row.appendChild(el('span', 'tag', rankText(r.rank)));
       if (r.worth > 1) row.appendChild(el('span', 'tag warn', `${r.worth} worth`));
-      const award = el('button', 'award', 'Record stripe');
+      // A kid on eleven stripes (§15.12): the twelfth is the next belt, so
+      // the button records that belt. At the top of the kids belts there is
+      // nothing to record from here.
+      const full = Boolean(r.rank && r.rank.full);
+      if (full && !r.rank.nextBelt) {
+        row.appendChild(el('span', 'tag', 'top of the kids belts'));
+        list.appendChild(row);
+        continue;
+      }
+      const what = full ? r.rank.nextLabel : 'stripe';
+      const label = full ? `Record ${what}` : 'Record stripe';
+      const confirm = full ? `Confirm ${what}` : 'Confirm stripe';
+      if (full) row.appendChild(el('span', 'tag warn', 'belt next'));
+      const award = el('button', 'award', label);
       award.type = 'button';
       award.addEventListener('click', async () => {
         if (!award.classList.contains('confirm')) {
           award.classList.add('confirm');
-          award.textContent = 'Confirm stripe';
-          setTimeout(() => { award.classList.remove('confirm'); award.textContent = 'Record stripe'; }, 4000);
+          award.textContent = confirm;
+          setTimeout(() => { award.classList.remove('confirm'); award.textContent = label; }, 4000);
           return;
         }
         try {
-          await post('/api/staff/promote', { contactId: r.id, kind: 'stripe' });
-          toast(`Stripe recorded for ${r.first}`);
+          await post('/api/staff/promote', full ? { contactId: r.id, kind: 'belt', belt: r.rank.nextBelt, stripes: 0 } : { contactId: r.id, kind: 'stripe' });
+          toast(full ? `${what} recorded for ${r.first}` : `Stripe recorded for ${r.first}`);
           await loadStripes();
         } catch (e) {
           toast(`Could not record: ${e.message}`);
@@ -891,7 +909,12 @@
   function renderRankForm(d) {
     const r = d.rank && d.rank.enabled ? d.rank : null;
     $('member-rank').style.display = r ? '' : 'none';
-    $('member-stripe').style.display = d.canRecordStripe ? '' : 'none';
+    // A kid on eleven stripes has no twelfth to give: the next step is the
+    // belt, recorded with the belt form (§15.12).
+    const full = Boolean(r && r.rank && r.rank.full);
+    $('member-stripe').style.display = d.canRecordStripe && !full ? '' : 'none';
+    $('rank-next').textContent = full ? (r.rank.nextLabel ? `Eleven stripes. The next step is the ${r.rank.nextLabel}.` : 'Eleven stripes, at the top of the kids belts.') : '';
+    $('rank-next').style.display = full ? '' : 'none';
     resetArmed($('rank-save'), 'Record belt');
     resetArmed($('stripe-add'), 'Record stripe');
     if (!r) return;
@@ -909,9 +932,11 @@
     // already past four is offered what they hold: saving a belt must never
     // quietly cut their stripes down.
     const held = r.rank ? Number(r.rank.stripes) || 0 : 0;
-    const most = Math.min(Math.max(4, held), Number(r.maxStripes) || 12);
+    // A kid on the monthly degrees is offered all eleven, named by colour.
+    const named = Array.isArray(r.stripeOptions) ? r.stripeOptions : null;
+    const most = named ? named.length - 1 : Math.min(Math.max(4, held), Number(r.maxStripes) || 12);
     for (let i = 0; i <= most; i += 1) {
-      const opt = el('option', '', i === 1 ? '1 stripe' : `${i} stripes`);
+      const opt = el('option', '', named ? named[i].label : i === 1 ? '1 stripe' : `${i} stripes`);
       opt.value = String(i);
       stripes.appendChild(opt);
     }
