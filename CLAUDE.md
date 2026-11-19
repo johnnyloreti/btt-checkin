@@ -406,6 +406,7 @@ So, for any migration from here on:
 - **No optional column may be named unconditionally in a query on the check-in path.** Ask `hasWaiverColumn` in `src/schema-caps.js` first and build the SQL accordingly. A pending migration must degrade the feature, never break attendance.
 - **`/health` reports `schemaCurrent`** and goes `ok: false` with the migration filename when a column is missing. A half-applied deploy is visible.
 - Apply the migration before the deploy that needs it, but the deploy must survive the other order.
+- **A migration run after its deploy is noticed without a redeploy** (2026-11-19). `src/schema-caps.js` remembers "it is there" for the life of the isolate and "it is not there" for one minute (`RECHECK_MS`). Before this, an isolate that had looked once kept the feature hidden, and `/health` kept naming the file, after the file had been run.
 
 **Field rule, learned 2026-09-25.** The GHL side of this feature was never finished: the sub-account had no `checkin_last_at` field until 2026-09-25, so for weeks every nudge wrote to a field that did not exist. `notifyWaiverCheckin` reported it and the caller only `console.warn`ed, so nothing surfaced. Fixed the same day:
 - `src/fields.js` lists every custom field the Worker writes (`requiredFieldKeys`). **Any new field the Worker writes is added there.** The roster sync checks the list every run and goes `degraded` naming what is missing; `/health` shows `missingFields` and goes `ok: false` while any are missing.

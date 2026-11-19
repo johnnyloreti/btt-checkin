@@ -13,7 +13,7 @@ import { syncRoster } from '../src/roster.js';
 import { loadSchedule } from '../src/schedule.js';
 import { opaqueId } from '../src/ids.js';
 import { resetFallback } from '../src/ratelimit.js';
-import { hasWaiverColumn, resetSchemaCaps } from '../src/schema-caps.js';
+import { hasWaiverColumn, hasBeltColumns, hasLessonTables, resetSchemaCaps, ageSchemaCaps, RECHECK_MS } from '../src/schema-caps.js';
 import { readRepoFile } from './helpers.js';
 import { memoryD1 } from './d1.js';
 import { CONTACTS } from './fixtures/contacts.js';
@@ -94,4 +94,46 @@ test('the kiosk drains its queue when the page returns to the foreground', () =>
   const html = readRepoFile('public/index.html');
   assert.match(html, /visibilitychange/, 'iOS suspends timers on a sleeping iPad');
   assert.match(html, /pageshow/);
+});
+
+// A deploy that went out ahead of its migration: once Johnny runs the file,
+// the feature has to appear without a redeploy. "Not there" used to be
+// remembered for the life of the isolate, so it stayed hidden, and /health
+// kept naming a file that had already been run.
+test('a migration run after the deploy is noticed within a minute, and "there" is never asked again', async () => {
+  const DB = memoryD1({ noBelt: true, noLessons: true });
+  const env = { DB };
+  assert.equal(await hasBeltColumns(env), false);
+  assert.equal(await hasLessonTables(env), false);
+
+  // Johnny runs 006 and 007.
+  DB.raw.exec(readRepoFile('src/db/migrations/006_belts.sql'));
+  DB.raw.exec(readRepoFile('src/db/migrations/007_lessons.sql'));
+  assert.equal(await hasBeltColumns(env), false, 'inside the minute the remembered answer stands: no query per request');
+  ageSchemaCaps(RECHECK_MS - 5_000);
+  assert.equal(await hasBeltColumns(env), false, 'still inside it');
+  ageSchemaCaps(10_000);
+  assert.equal(await hasBeltColumns(env), true);
+  assert.equal(await hasLessonTables(env), true);
+
+  // "There" is kept for good: no further look, even with the database gone.
+  let asked = 0;
+  const gone = { DB: { prepare: () => { asked += 1; throw new Error('no database'); } } };
+  ageSchemaCaps(10 * RECHECK_MS);
+  assert.equal(await hasBeltColumns(gone), true);
+  assert.equal(await hasLessonTables(gone), true);
+  assert.equal(asked, 0);
+});
+
+test('a database that cannot be read counts as "not there", and is asked again later', async () => {
+  resetSchemaCaps();
+  let asked = 0;
+  const broken = { DB: { prepare: () => { asked += 1; throw new Error('D1 is down'); } } };
+  assert.equal(await hasWaiverColumn(broken), false);
+  assert.equal(await hasWaiverColumn(broken), false);
+  assert.equal(asked, 1, 'one look a minute, not one per check-in');
+  ageSchemaCaps();
+  const DB = memoryD1();
+  // memoryD1 resets the caps; a fresh look at a good database says yes.
+  assert.equal(await hasWaiverColumn({ DB }), true);
 });

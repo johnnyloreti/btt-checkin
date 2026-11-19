@@ -254,6 +254,11 @@ await step('away: who has gone quiet, longest first, and a tap opens the member'
   assert.match(await page.locator('#away-rule').textContent(), /14 days or more/);
   const rows = await page.locator('#away-list .row').allTextContents();
   assert.equal(rows.length, 1, `expected one away, got ${rows.length}`);
+  // Two taps before the first answer is back used to draw the list twice.
+  await page.evaluate(() => { const t = document.querySelector('.tab[data-tab="away"]'); t.click(); t.click(); });
+  await page.waitForSelector('#away-list .row');
+  await page.waitForTimeout(300);
+  assert.equal(await page.locator('#away-list .row').count(), 1, 'a double tap still shows each member once');
   assert.match(rows[0], /Jack Silva/);
   assert.match(rows[0], /Kids 6-9/);
   assert.match(rows[0], /Last class Sat, Aug 8/);
@@ -314,6 +319,16 @@ await step('belts: record a rank on the member screen, add a stripe, and see it 
   await page.click('#stripe-add');
   await page.waitForFunction(() => /Grey belt, 3 stripes/.test(document.getElementById('member-facts').textContent));
   await page.screenshot({ path: join(OUT, 'staff-member-belt.png') });
+
+  // A new belt starts with no stripes: picking another belt clears the
+  // stripes box instead of carrying the old belt's three across, and going
+  // back to the belt they hold puts them back. Nothing is recorded here.
+  assert.equal(await page.locator('#rank-stripes').inputValue(), '3');
+  await page.selectOption('#rank-belt', 'yellow');
+  assert.equal(await page.locator('#rank-stripes').inputValue(), '0');
+  await page.selectOption('#rank-belt', 'grey');
+  assert.equal(await page.locator('#rank-stripes').inputValue(), '3');
+  assert.equal(env.DB.raw.prepare('SELECT COUNT(*) AS n FROM promotions').get().n, 2);
 
   // The class roster shows rank beside the name. An earlier step left the
   // date bar on Sunday; step back to Saturday and put it back after.

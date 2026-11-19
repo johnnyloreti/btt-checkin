@@ -472,16 +472,27 @@
     if (!r.lastAwardedOn) return 'their first class';
     return r.lastKind === 'belt' ? 'their belt' : 'last stripe';
   }
+  // A second tap on a tab or an arrow while the first load is still on the
+  // wire used to draw the view twice, and on Plan left the title on one week
+  // and the boxes on another. Each view keeps a counter; only the newest
+  // load is allowed to draw.
+  const loadSeq = {};
+  function latest(view) {
+    const n = (loadSeq[view] = (loadSeq[view] || 0) + 1);
+    return () => loadSeq[view] === n;
+  }
   async function loadStripes() {
+    const fresh = latest('stripes');
     const list = $('stripes-list');
     list.innerHTML = '';
     let data;
     try {
       data = await api('/api/staff/stripes');
     } catch (e) {
-      list.appendChild(el('div', 'empty', e.message));
+      if (fresh()) list.appendChild(el('div', 'empty', e.message));
       return;
     }
+    if (!fresh()) return;
     $('stripes-rule').textContent = data.threshold ? `every ${data.threshold} classes` : '';
     renderStripesNext(data);
     if (!data.enabled) {
@@ -552,13 +563,15 @@
     list.innerHTML = '';
     never.innerHTML = '';
     $('away-never-box').hidden = true;
+    const fresh = latest('away');
     let data;
     try {
       data = await api('/api/staff/away');
     } catch (e) {
-      list.appendChild(el('div', 'empty', e.message));
+      if (fresh()) list.appendChild(el('div', 'empty', e.message));
       return;
     }
+    if (!fresh()) return;
     if (!data.enabled) {
       $('away-rule').textContent = '';
       $('away-note').textContent = '';
@@ -647,6 +660,12 @@
   const saveNote = (classStartLocal, className) => async (body) => (await post('/api/staff/lessons/note', { classStartLocal, className, body })).note;
   function renderClassLesson(lesson) {
     const box = $('class-lesson');
+    // The roster reloads after every add and remove. If staff are part-way
+    // through typing a note for this same class, leave the boxes alone:
+    // redrawing them threw the typing away.
+    const key = current ? `${current.startLocal}|${current.name}` : '';
+    if (box.dataset.key === key && box.querySelector('textarea')) return;
+    box.dataset.key = key;
     box.innerHTML = '';
     if (!lesson || !lesson.enabled || !lesson.scheduled) return;
     box.append(
@@ -656,15 +675,17 @@
   }
   let planWeek = null;
   async function loadPlan() {
+    const fresh = latest('plan');
     const box = $('plan-box');
     box.innerHTML = '';
     let data;
     try {
       data = await api(`/api/staff/lessons${planWeek ? `?week=${planWeek}` : ''}`);
     } catch (e) {
-      box.appendChild(el('div', 'empty', e.message));
+      if (fresh()) box.appendChild(el('div', 'empty', e.message));
       return;
     }
+    if (!fresh()) return;
     planWeek = data.weekStart;
     $('plan-title').textContent = `Week of ${fmtDate(data.weekStart).replace(/^\w+, /, '')}`;
     for (const p of data.programs) {
@@ -676,20 +697,23 @@
       }
     }
   }
-  $('plan-prev').addEventListener('click', () => { planWeek = shiftDate(planWeek, -7); loadPlan(); });
-  $('plan-next').addEventListener('click', () => { planWeek = shiftDate(planWeek, 7); loadPlan(); });
+  // No week to step from until the first load has come back.
+  $('plan-prev').addEventListener('click', () => { if (!planWeek) return; planWeek = shiftDate(planWeek, -7); loadPlan(); });
+  $('plan-next').addEventListener('click', () => { if (!planWeek) return; planWeek = shiftDate(planWeek, 7); loadPlan(); });
 
   // ---------- trends (§15.6) ----------
   async function loadTrends() {
+    const fresh = latest('trends');
     const box = $('trends-box');
     box.innerHTML = '';
     let data;
     try {
       data = await api('/api/staff/trends');
     } catch (e) {
-      box.appendChild(el('div', 'empty', e.message));
+      if (fresh()) box.appendChild(el('div', 'empty', e.message));
       return;
     }
+    if (!fresh()) return;
     const table = el('table', 'trend');
     const head = el('tr');
     head.appendChild(el('th', '', 'Class'));
@@ -824,14 +848,29 @@
     if (r.rank && r.options.some((o) => o.key === r.rank.belt)) belt.value = r.rank.belt;
     const stripes = $('rank-stripes');
     stripes.innerHTML = '';
-    for (let i = 0; i <= 4; i += 1) {
+    // Four is the usual most, but the Stripes tab has no cap, so a member
+    // already past four is offered what they hold: saving a belt must never
+    // quietly cut their stripes down.
+    const held = r.rank ? Number(r.rank.stripes) || 0 : 0;
+    const most = Math.min(Math.max(4, held), Number(r.maxStripes) || 12);
+    for (let i = 0; i <= most; i += 1) {
       const opt = el('option', '', i === 1 ? '1 stripe' : `${i} stripes`);
       opt.value = String(i);
       stripes.appendChild(opt);
     }
-    stripes.value = String(Math.min(4, r.rank ? r.rank.stripes : 0));
+    stripes.value = String(Math.min(most, held));
+    rankShown = { belt: belt.value, stripes: stripes.value };
     $('rank-held').checked = false;
   }
+  // A new belt starts with no stripes (§15.4). The stripes box used to keep
+  // showing the old belt's, so White with 3 became Grey-white with 3. Picking
+  // a different belt now sets it to zero; going back to the belt they hold
+  // puts their stripes back. Staff can still change it before recording.
+  let rankShown = null;
+  $('rank-belt').addEventListener('change', () => {
+    if (!rankShown) return;
+    $('rank-stripes').value = $('rank-belt').value === rankShown.belt ? rankShown.stripes : '0';
+  });
   function resetArmed(button, label) {
     button.classList.remove('confirm');
     button.textContent = label;
@@ -854,22 +893,37 @@
         stripes: Number($('rank-stripes').value),
         starting: $('rank-held').checked,
       });
-      toast(`Belt recorded for ${picking.first}`);
-      await openMember(picking.m);
     } catch (e) {
       toast(`Could not record: ${e.message}`);
+      return;
     }
+    // Recorded. From here a failure is only the screen not refreshing, and
+    // must not read as "could not record" with the button still armed: one
+    // more tap would write a second row.
+    resetArmed($('rank-save'), 'Record belt');
+    toast(`Belt recorded for ${picking.first}`);
+    await refreshMember(picking.m);
   });
   $('stripe-add').addEventListener('click', async () => {
     if (!picking || !armed($('stripe-add'), 'Record stripe', 'Confirm stripe')) return;
     try {
       await post('/api/staff/promote', { contactId: picking.m.id, kind: 'stripe' });
-      toast(`Stripe recorded for ${picking.first}`);
-      await openMember(picking.m);
     } catch (e) {
       toast(`Could not record: ${e.message}`);
+      return;
     }
+    resetArmed($('stripe-add'), 'Record stripe');
+    toast(`Stripe recorded for ${picking.first}`);
+    await refreshMember(picking.m);
   });
+  // Redraw the member screen after a write that has already gone through.
+  async function refreshMember(m) {
+    try {
+      await openMember(m);
+    } catch (e) {
+      toast(`Saved, but the screen did not refresh: ${e.message}. Open the member again.`);
+    }
+  }
   function renderPromotions(d, m) {
     const box = $('member-promotions');
     box.innerHTML = '';
@@ -895,9 +949,19 @@
             setTimeout(() => { undo.textContent = 'Undo'; }, 4000);
             return;
           }
-          await post('/api/staff/promote/undo', { contactId: m.id });
+          // Once, and never again from this button: a second tap after a
+          // slow or failed refresh used to remove the next promotion too.
+          undo.disabled = true;
+          try {
+            await post('/api/staff/promote/undo', { contactId: m.id });
+          } catch (e) {
+            undo.disabled = false;
+            undo.textContent = 'Undo';
+            toast(`Could not remove: ${e.message}`);
+            return;
+          }
           toast('Removed');
-          await openMember(m);
+          await refreshMember(m);
         });
         row.appendChild(undo);
       }

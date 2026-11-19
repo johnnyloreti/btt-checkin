@@ -10,113 +10,99 @@
 // check-in path. Ask here first; a missing column degrades the feature
 // instead of breaking attendance.
 
-const UNKNOWN = null;
-let waiverColumn = UNKNOWN;
-let promotionsTable = UNKNOWN;
-let tabTables = UNKNOWN;
-let payerColumn = UNKNOWN;
-let beltColumns = UNKNOWN;
-let lessonTables = UNKNOWN;
+//
+// "It is there" is remembered for the life of the isolate: a migration does
+// not un-run. "It is not there" is remembered for RECHECK_MS only. It used to
+// be remembered for good, so when a deploy went out ahead of its migration,
+// an isolate that had already looked kept the feature hidden, and /health
+// kept naming the file, after Johnny had run it, until Cloudflare happened
+// to recycle the isolate. Now the next look after a minute finds it.
+
+export const RECHECK_MS = 60_000;
+
+/** One remembered answer: yes for good, no for a minute. */
+function remembered(probe) {
+  let value = null;
+  let at = 0;
+  return {
+    async get(env) {
+      if (value === true) return true;
+      if (value === false && Date.now() - at < RECHECK_MS) return false;
+      try {
+        value = Boolean(await probe(env));
+      } catch {
+        value = false; // can't tell: assume not there, which is the safe side
+      }
+      at = Date.now();
+      return value;
+    },
+    reset() {
+      value = null;
+      at = 0;
+    },
+    /** Test hook: make a remembered "no" old enough to be asked again. */
+    age(ms) {
+      at -= ms;
+    },
+  };
+}
 
 /** The seven tables migration 004 creates (§15.3). All or nothing. */
 export const TAB_TABLES = ['purchase_pins', 'pin_setup_tokens', 'pin_failures', 'purchases', 'closeouts', 'closeout_payers', 'tab_flags'];
 
-/** True when members.waiver exists. Cached per isolate; one query at most. */
-export async function hasWaiverColumn(env) {
-  if (waiverColumn !== UNKNOWN) return waiverColumn;
-  try {
-    const { results } = await env.DB.prepare(
-      "SELECT name FROM pragma_table_info('members') WHERE name = 'waiver'",
-    ).all();
-    waiverColumn = results.length > 0;
-  } catch {
-    waiverColumn = false; // can't tell: assume not there, which is the safe side
-  }
-  return waiverColumn;
-}
-
-/** True when the promotions table exists (§15.2). Cached per isolate. */
-export async function hasPromotionsTable(env) {
-  if (promotionsTable !== UNKNOWN) return promotionsTable;
-  try {
-    const { results } = await env.DB.prepare(
-      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'promotions'",
-    ).all();
-    promotionsTable = results.length > 0;
-  } catch {
-    promotionsTable = false;
-  }
-  return promotionsTable;
-}
-
-/** True when every drink-tab table exists (§15.3). Cached per isolate. */
-export async function hasTabTables(env) {
-  if (tabTables !== UNKNOWN) return tabTables;
-  try {
-    const marks = TAB_TABLES.map(() => '?').join(', ');
-    const { results } = await env.DB.prepare(
-      `SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (${marks})`,
-    ).bind(...TAB_TABLES).all();
-    tabTables = results.length === TAB_TABLES.length;
-  } catch {
-    tabTables = false;
-  }
-  return tabTables;
-}
-
-/** True when members.payer_contact_id exists (migration 005). Cached per isolate. */
-export async function hasPayerColumn(env) {
-  if (payerColumn !== UNKNOWN) return payerColumn;
-  try {
-    const { results } = await env.DB.prepare(
-      "SELECT name FROM pragma_table_info('members') WHERE name = 'payer_contact_id'",
-    ).all();
-    payerColumn = results.length > 0;
-  } catch {
-    payerColumn = false;
-  }
-  return payerColumn;
-}
-
 /** The three columns migration 006 adds to promotions (§15.4). All or nothing. */
 export const BELT_COLUMNS = ['belt', 'stripes', 'starting'];
-
-/** True when promotions has the belt columns (migration 006). Cached per isolate. */
-export async function hasBeltColumns(env) {
-  if (beltColumns !== UNKNOWN) return beltColumns;
-  try {
-    const { results } = await env.DB.prepare("SELECT name FROM pragma_table_info('promotions')").all();
-    const names = new Set(results.map((r) => r.name));
-    beltColumns = BELT_COLUMNS.every((c) => names.has(c));
-  } catch {
-    beltColumns = false;
-  }
-  return beltColumns;
-}
 
 /** The two tables migration 007 creates (§15.8). All or nothing. */
 export const LESSON_TABLES = ['lesson_plans', 'class_notes'];
 
-/** True when both lesson tables exist (migration 007). Cached per isolate. */
-export async function hasLessonTables(env) {
-  if (lessonTables !== UNKNOWN) return lessonTables;
-  try {
-    const { results } = await env.DB.prepare(
-      "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('lesson_plans', 'class_notes')",
-    ).all();
-    lessonTables = results.length === LESSON_TABLES.length;
-  } catch {
-    lessonTables = false;
-  }
-  return lessonTables;
+// Table and column names here are this file's own constants, never request
+// input, so they are written into the SQL as they are.
+async function tablesPresent(env, names) {
+  const list = names.map((n) => `'${n}'`).join(', ');
+  const { results } = await env.DB.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (${list})`).all();
+  return results.length === names.length;
 }
 
-/** Test hook, and a way to re-check after a migration without a redeploy. */
+async function columnsPresent(env, table, names) {
+  const { results } = await env.DB.prepare(`SELECT name FROM pragma_table_info('${table}')`).all();
+  const have = new Set(results.map((r) => r.name));
+  return names.every((c) => have.has(c));
+}
+
+const caps = {
+  waiver: remembered((env) => columnsPresent(env, 'members', ['waiver'])),
+  promotions: remembered((env) => tablesPresent(env, ['promotions'])),
+  tab: remembered((env) => tablesPresent(env, TAB_TABLES)),
+  payer: remembered((env) => columnsPresent(env, 'members', ['payer_contact_id'])),
+  belt: remembered((env) => columnsPresent(env, 'promotions', BELT_COLUMNS)),
+  lessons: remembered((env) => tablesPresent(env, LESSON_TABLES)),
+};
+
+/** True when members.waiver exists (migration 002). */
+export const hasWaiverColumn = (env) => caps.waiver.get(env);
+
+/** True when the promotions table exists (migration 003, §15.2). */
+export const hasPromotionsTable = (env) => caps.promotions.get(env);
+
+/** True when every drink-tab table exists (migration 004, §15.3). */
+export const hasTabTables = (env) => caps.tab.get(env);
+
+/** True when members.payer_contact_id exists (migration 005). */
+export const hasPayerColumn = (env) => caps.payer.get(env);
+
+/** True when promotions has the belt columns (migration 006, §15.4). */
+export const hasBeltColumns = (env) => caps.belt.get(env);
+
+/** True when both lesson tables exist (migration 007, §15.8). */
+export const hasLessonTables = (env) => caps.lessons.get(env);
+
+/** Test hook: forget every answer. */
 export function resetSchemaCaps() {
-  lessonTables = UNKNOWN;
-  beltColumns = UNKNOWN;
-  payerColumn = UNKNOWN;
-  waiverColumn = UNKNOWN;
-  promotionsTable = UNKNOWN;
-  tabTables = UNKNOWN;
+  for (const c of Object.values(caps)) c.reset();
+}
+
+/** Test hook: let every remembered "no" go stale, as if RECHECK_MS had passed. */
+export function ageSchemaCaps(ms = RECHECK_MS + 1) {
+  for (const c of Object.values(caps)) c.age(ms);
 }
