@@ -231,7 +231,7 @@ Johnny: "Propose a plan to continue the build and keep yourself busy." Six items
 **1. A second read of everything built that day.** Fixed:
 - *Member page, PIN guesses.* The five-a-day limit counted wrong tries before checking a PIN and wrote them after, so a burst of requests sent together could each get a guess. A try is now claimed first (§15.9).
 - *Member page, texts.* "Text me my link" leaned on GHL not re-sending an unchanged field. The Worker now enforces one a day per account itself, with a ceiling of 40 across everyone, and "Set up or reset my PIN" is three a day per account. Otherwise anyone could tap every name and text the whole gym.
-- *Weak PINs.* 0000, 1234, 9876 and the like (24 of 10,000) are refused when a PIN is set. PINs people already have are untouched. **This changes what a member sees at setup; say so if you would rather not have it.**
+- *Weak PINs.* 0000, 1234, 9876 and the like (24 of 10,000) are refused when a PIN is set. PINs people already have are untouched. You said to keep it (2026-11-19).
 - *Progress page.* A rate limit or a server hiccup made the phone forget its saved page. Only a dead link does that now.
 - *Belts.* Recording a new belt carried the old belt's stripes across. A different belt now starts at zero.
 - *Stripe, belt and undo buttons.* A write that worked but whose screen refresh failed was reported as failed, button still armed; one more tap wrote a second row or undid a second promotion.
