@@ -5,7 +5,7 @@
 
 import { DatabaseSync } from 'node:sqlite';
 import { readRepoFile } from './helpers.js';
-import { resetSchemaCaps, TAB_TABLES } from '../src/schema-caps.js';
+import { resetSchemaCaps, TAB_TABLES, BELT_COLUMNS } from '../src/schema-caps.js';
 
 const SCHEMA = readRepoFile('src/db/schema.sql');
 
@@ -15,17 +15,19 @@ const SCHEMA = readRepoFile('src/db/schema.sql');
  *   noPromotions: true  no promotions table (003)
  *   noTab: true         none of the drink-tab tables (004)
  *   noPayer: true       members without payer_contact_id (005)
+ *   noBelt: true        promotions without the belt columns (006)
  *
  * Used to prove that a deploy running ahead of its migration degrades
  * instead of breaking.
  */
-export function memoryD1({ legacy = false, noPromotions = false, noTab = false, noPayer = false } = {}) {
+export function memoryD1({ legacy = false, noPromotions = false, noTab = false, noPayer = false, noBelt = false } = {}) {
   resetSchemaCaps();
   const db = new DatabaseSync(':memory:');
   db.exec(SCHEMA);
   if (legacy) db.exec('ALTER TABLE members DROP COLUMN waiver');
   if (legacy || noPayer) db.exec('ALTER TABLE members DROP COLUMN payer_contact_id');
   if (noPromotions) db.exec('DROP TABLE promotions');
+  else if (noBelt) for (const c of BELT_COLUMNS) db.exec(`ALTER TABLE promotions DROP COLUMN ${c}`);
   if (noTab) for (const t of TAB_TABLES) db.exec(`DROP TABLE ${t}`);
 
   const isSelect = (sql) => /^\s*(select|with|pragma)\b/i.test(sql);

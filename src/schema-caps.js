@@ -15,6 +15,7 @@ let waiverColumn = UNKNOWN;
 let promotionsTable = UNKNOWN;
 let tabTables = UNKNOWN;
 let payerColumn = UNKNOWN;
+let beltColumns = UNKNOWN;
 
 /** The seven tables migration 004 creates (§15.3). All or nothing. */
 export const TAB_TABLES = ['purchase_pins', 'pin_setup_tokens', 'pin_failures', 'purchases', 'closeouts', 'closeout_payers', 'tab_flags'];
@@ -76,8 +77,25 @@ export async function hasPayerColumn(env) {
   return payerColumn;
 }
 
+/** The three columns migration 006 adds to promotions (§15.4). All or nothing. */
+export const BELT_COLUMNS = ['belt', 'stripes', 'starting'];
+
+/** True when promotions has the belt columns (migration 006). Cached per isolate. */
+export async function hasBeltColumns(env) {
+  if (beltColumns !== UNKNOWN) return beltColumns;
+  try {
+    const { results } = await env.DB.prepare("SELECT name FROM pragma_table_info('promotions')").all();
+    const names = new Set(results.map((r) => r.name));
+    beltColumns = BELT_COLUMNS.every((c) => names.has(c));
+  } catch {
+    beltColumns = false;
+  }
+  return beltColumns;
+}
+
 /** Test hook, and a way to re-check after a migration without a redeploy. */
 export function resetSchemaCaps() {
+  beltColumns = UNKNOWN;
   payerColumn = UNKNOWN;
   waiverColumn = UNKNOWN;
   promotionsTable = UNKNOWN;

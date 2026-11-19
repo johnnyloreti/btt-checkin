@@ -9,7 +9,7 @@ import {
 import { reviewPayers, payerCardStatus, startCloseout, runPayer, refreshPayer, markPaidAtPos, latestCloseout, closeoutPayers, tabTick } from './closeout.js';
 import { runRollup } from './rollup.js';
 import { notifyWaiverCheckin, waiverEnabled, logWaiverFailure, payerFieldKey } from './waiver.js';
-import { hasWaiverColumn, hasPromotionsTable, hasTabTables, hasPayerColumn } from './schema-caps.js';
+import { hasWaiverColumn, hasPromotionsTable, hasTabTables, hasPayerColumn, hasBeltColumns } from './schema-caps.js';
 import { tabConfig, canBuy } from './tab.js';
 import { createSetupToken, readSetupToken, completeSetup, clearLockout, pinActivity, writePinLink, requirePepper } from './pin.js';
 import { hasNoCardFlag, recordPurchase, purchasesBetween, voidPurchase, memberTab, clearNoCardFlag } from './purchases.js';
@@ -17,13 +17,13 @@ import { verifyPin, pinStatus } from './pin.js';
 import { formatCents } from './tab.js';
 import { logSyncRow } from './synclog.js';
 import { getFieldIds } from './rollup.js';
-import { stripeCandidates, recordPromotion, undoLastPromotion, promotionHistory, stripesEnabled } from './promotions.js';
+import { stripeCandidates, recordPromotion, undoLastPromotion, promotionHistory, stripesEnabled, beltsEnabled, memberRank } from './promotions.js';
 import { isStaff, pinMatches, issueToken, cookieHeader, SESSION_MS } from './staff-auth.js';
 import { buildIdMap, opaqueId, requireSalt } from './ids.js';
 import { matchClasses, windowFromEnv } from './classes.js';
 import { allowRequest, PUBLIC, LOGIN } from './ratelimit.js';
 import { recordCheckin } from './checkin.js';
-import { today, classRoster, voidAttendance, memberHistory } from './staff.js';
+import { today, classRoster, voidAttendance, memberHistory, awayList } from './staff.js';
 import { localParts, localDayBounds } from './time.js';
 
 /** Static files the Worker will hand to the assets binding. Everything else is 404. */
@@ -118,6 +118,7 @@ export async function health(env, schedule, now = new Date(), opts = {}) {
     if (!(await hasWaiverColumn(env))) problems.push('members.waiver missing: run src/db/migrations/002_waiver.sql');
     if (stripesEnabled(env) && !(await hasPromotionsTable(env))) problems.push('promotions table missing: run src/db/migrations/003_promotions.sql');
     if (payerFieldKey(env) && !(await hasPayerColumn(env))) problems.push('members.payer_contact_id missing: run src/db/migrations/005_payer.sql');
+    if (beltsEnabled(env) && (await hasPromotionsTable(env)) && !(await hasBeltColumns(env))) problems.push('promotions belt columns missing: run src/db/migrations/006_belts.sql');
     // The tab (§15.3): off, on, or misconfigured, and whether its tables exist.
     const tab = tabConfig(env, opts.tabItems || {});
     const tabSchema = await hasTabTables(env);
@@ -515,7 +516,13 @@ export function createApp(schedule, deps = defaultDeps(), opts = {}) {
             if (tab.enabled) {
               for (const r of [...tab.open, ...tab.recent]) { delete r.buyerId; delete r.payerId; r.price = formatCents(r.amountCents); }
             }
-            return json({ ...history, promotions: await promotionHistory(env, member.ghl_contact_id), tab });
+            return json({
+              ...history,
+              promotions: await promotionHistory(env, member.ghl_contact_id),
+              rank: await memberRank(env, member),
+              canRecordStripe: stripesEnabled(env) && (await hasPromotionsTable(env)),
+              tab,
+            });
           }
 
           // ---- drink tab, staff (§15.3) ----
@@ -695,9 +702,14 @@ export function createApp(schedule, deps = defaultDeps(), opts = {}) {
             return json({ ...list, rows: await withIds(list.rows), upNext: await withIds(list.upNext) });
           }
           if (method === 'POST' && (path === '/api/staff/promote' || path === '/api/staff/promote/undo')) {
-            if (!stripesEnabled(env)) return json({ error: 'stripe tracking is off' }, 404);
+            if (!stripesEnabled(env) && !beltsEnabled(env)) return json({ error: 'stripe tracking is off' }, 404);
             const body = await readJson(request);
             if (!body) return json({ error: 'expected JSON body' }, 400);
+            // A belt (§15.4) and a stripe (§15.2) switch off separately.
+            if (path === '/api/staff/promote') {
+              if (body.kind === 'belt' && !beltsEnabled(env)) return json({ error: 'belt tracking is off' }, 404);
+              if (body.kind !== 'belt' && !stripesEnabled(env)) return json({ error: 'stripe tracking is off' }, 404);
+            }
             const member = await resolveMember(env, body.contactId);
             if (!member) return json({ error: 'unknown member' }, 404);
             if (path === '/api/staff/promote/undo') {
@@ -707,8 +719,26 @@ export function createApp(schedule, deps = defaultDeps(), opts = {}) {
               contactId: member.ghl_contact_id,
               kind: body.kind,
               note: body.note,
+              belt: body.belt,
+              stripes: body.stripes,
+              starting: body.starting === true,
               now: now(),
             }));
+          }
+
+          // ---- away list (§15.5) ----
+          if (method === 'GET' && path === '/api/staff/away') {
+            const salt = requireSalt(env);
+            const list = await awayList(env, schedule, now());
+            const withIds = async (items) => {
+              const out = [];
+              for (const r of items) {
+                const { ghl_contact_id: contactId, ...rest } = r;
+                out.push({ id: await opaqueId(contactId, salt), ...rest });
+              }
+              return out;
+            };
+            return json({ ...list, away: await withIds(list.away), never: await withIds(list.never) });
           }
         }
 

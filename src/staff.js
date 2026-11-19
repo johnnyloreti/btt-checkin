@@ -5,6 +5,7 @@ import { classesOn, UNSCHEDULED_CLASS, START_LOCAL_RE, shiftDate } from './class
 import { localParts } from './time.js';
 import { hasWaiverColumn, hasPayerColumn } from './schema-caps.js';
 import { backdateFromEnv } from './checkin.js';
+import { ranksFor } from './promotions.js';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -53,7 +54,7 @@ export async function classRoster(env, schedule, startLocal, className) {
   const waiverCol = (await hasWaiverColumn(env)) ? 'm.waiver' : 'NULL AS waiver';
   const { results } = await env.DB.prepare(
     `SELECT a.id, a.ghl_contact_id, a.class_name, a.checked_in_at, a.method, a.status_at_checkin,
-            m.first_name, m.last_name, ${waiverCol}
+            m.first_name, m.last_name, m.programs, ${waiverCol}
        FROM attendance a
        LEFT JOIN members m ON m.ghl_contact_id = a.ghl_contact_id
       WHERE a.class_start_local = ? AND a.status = 'attended' AND (? IS NULL OR a.class_name = ?)
@@ -61,6 +62,9 @@ export async function classRoster(env, schedule, startLocal, className) {
   )
     .bind(startLocal, filterName, filterName)
     .all();
+  // Belt and stripes beside each name (§15.4). Empty when belts are off or
+  // migration 006 is pending, and the roster simply shows no rank.
+  const ranks = await ranksFor(env, results.map((r) => ({ ghl_contact_id: r.ghl_contact_id, programs: parsePrograms(r.programs) })));
   return {
     startLocal,
     className: filterName || (results[0] ? results[0].class_name : null),
@@ -73,8 +77,18 @@ export async function classRoster(env, schedule, startLocal, className) {
       method: r.method,
       statusAtCheckin: r.status_at_checkin,
       waiver: r.waiver === null || r.waiver === undefined ? null : Number(r.waiver) === 1,
+      rank: ranks.get(r.ghl_contact_id) || null,
     })),
   };
+}
+
+function parsePrograms(raw) {
+  try {
+    const p = JSON.parse(raw);
+    return Array.isArray(p) ? p : [];
+  } catch {
+    return [];
+  }
 }
 
 /** Void: soft delete. Sets status, never deletes. Returns how many rows changed. */
@@ -140,4 +154,64 @@ export async function memberHistory(env, schedule, contactId, now) {
       statusAtCheckin: r.status_at_checkin,
     })),
   };
+}
+
+// ---------- away list (§15.5) ----------
+export const DEFAULT_AWAY_DAYS = 14;
+
+/** Days without a class before a member is listed. "0" turns the list off. */
+export function awayConfig(env = {}) {
+  const raw = String(env.AWAY_DAYS ?? '').trim();
+  const n = Number(raw);
+  if (raw === '0') return { enabled: false, days: 0 };
+  return { enabled: true, days: raw !== '' && Number.isInteger(n) && n > 0 ? n : DEFAULT_AWAY_DAYS };
+}
+
+function daysBetween(fromDate, toDate) {
+  const utc = (d) => { const [y, m, day] = d.split('-').map(Number); return Date.UTC(y, m - 1, day); };
+  return Math.round((utc(toDate) - utc(fromDate)) / 86_400_000);
+}
+
+/**
+ * Who has gone quiet. Two lists of active members:
+ *   away   attended before, last class `days` or more days ago, longest first
+ *   never  on the roster with no attended class at all
+ * Days are whole ET calendar days from the class date to today. A voided
+ * check-in does not count as a class.
+ */
+export async function awayList(env, schedule, now) {
+  const cfg = awayConfig(env);
+  if (!cfg.enabled) return { enabled: false, days: 0, away: [], never: [] };
+  const todayLocal = localParts(now, env.TZ || schedule.timezone).date;
+  const { results } = await env.DB.prepare(
+    `SELECT m.ghl_contact_id, m.first_name, m.last_name, m.programs,
+            COUNT(a.id) AS lifetime, MAX(a.class_start_local) AS last_start
+       FROM members m
+       LEFT JOIN attendance a
+         ON a.ghl_contact_id = m.ghl_contact_id AND a.status = 'attended'
+      WHERE m.active = 1
+      GROUP BY m.ghl_contact_id`,
+  ).all();
+  const away = [];
+  const never = [];
+  for (const r of results) {
+    const programs = parsePrograms(r.programs);
+    const base = {
+      ghl_contact_id: r.ghl_contact_id,
+      first: r.first_name,
+      last: r.last_name,
+      programLabels: programs.filter((p) => schedule.programs[p]).map((p) => schedule.programs[p].label),
+    };
+    if (!r.last_start) {
+      never.push(base);
+      continue;
+    }
+    const lastDate = String(r.last_start).slice(0, 10);
+    const daysAway = daysBetween(lastDate, todayLocal);
+    if (daysAway >= cfg.days) away.push({ ...base, lastDate, daysAway, lifetime: Number(r.lifetime) || 0 });
+  }
+  const byName = (a, b) => a.first.localeCompare(b.first) || a.last.localeCompare(b.last);
+  away.sort((a, b) => b.daysAway - a.daysAway || byName(a, b));
+  never.sort(byName);
+  return { enabled: true, days: cfg.days, today: todayLocal, away, never };
 }

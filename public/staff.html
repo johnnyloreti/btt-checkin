@@ -68,6 +68,10 @@
   .overlay { position: fixed; inset: 0; background: var(--bg); z-index: 5; display: none; flex-direction: column; padding: 18px; overflow-y: auto; }
   .overlay.active { display: flex; }
   .overlay .top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .rankform { flex-wrap: wrap; }
+  .rankform select { font: inherit; font-size: 16px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--bone); }
+  .rankform .held { display: flex; align-items: center; gap: 8px; font-size: 15px; color: var(--muted); flex: 1 1 260px; }
+  .rankform .held input { width: 20px; height: 20px; accent-color: var(--gold); }
   .picklabel { display: block; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 10px 0 8px; }
   input[type="date"].search { -webkit-appearance: none; appearance: none; min-height: 58px; }
   input[type="date"].search::-webkit-date-and-time-value { text-align: left; }
@@ -80,6 +84,7 @@
   <span class="brand">BTT Staff</span>
   <button class="tab active" data-tab="tonight" type="button">Tonight</button>
   <button class="tab" data-tab="stripes" type="button">Stripes</button>
+  <button class="tab" data-tab="away" type="button">Away</button>
   <button class="tab" data-tab="members" type="button">Members</button>
   <button class="tab" data-tab="tab" id="tab-nav" type="button">Tab</button>
   <button class="tab quiet" id="signout" type="button">Sign out</button>
@@ -114,6 +119,17 @@
       <h2 style="font-size:22px;margin-top:28px">One class away</h2>
       <p class="note">Their next class makes it. Heads-up only; they move up once they check in.</p>
       <div id="stripes-next" class="list"></div>
+    </div>
+  </section>
+
+  <section id="away" class="view">
+    <h2>Away <span class="sub" id="away-rule"></span></h2>
+    <p class="note" id="away-note"></p>
+    <div id="away-list" class="list"></div>
+    <div id="away-never-box" hidden>
+      <h2 style="font-size:22px;margin-top:28px">Never checked in</h2>
+      <p class="note">On the roster with no class yet. A parent who does not train can be tagged program:none in GHL.</p>
+      <div id="away-never" class="list"></div>
     </div>
   </section>
 
@@ -155,6 +171,17 @@
       <div id="member-tab-list" class="list"></div>
     </div>
     <h2 style="font-size:22px">Stripes and belts</h2>
+    <div id="member-rank" class="list" style="display:none;margin-bottom:10px">
+      <div class="row rankform">
+        <select id="rank-belt" aria-label="Belt"></select>
+        <select id="rank-stripes" aria-label="Stripes on the belt"></select>
+        <label class="held"><input type="checkbox" id="rank-held"> They already hold this rank (keep the class count)</label>
+        <button class="award" id="rank-save" type="button">Record belt</button>
+      </div>
+    </div>
+    <div id="member-stripe" class="list" style="display:none;margin-bottom:10px">
+      <div class="row"><span class="name">Give a stripe now</span><button class="award" id="stripe-add" type="button">Record stripe</button></div>
+    </div>
     <div id="member-promotions" class="list"></div>
     <h2 style="font-size:22px">Last 30 days</h2>
     <div id="member-history" class="list"></div>
@@ -231,9 +258,14 @@
     if (text !== undefined) e.textContent = text;
     return e;
   }
+  // "Grey belt, 2 stripes". Empty when rank is not shown (§15.4).
+  function rankText(rank) {
+    if (!rank) return '';
+    return `${rank.label}${rank.stripes ? `, ${rank.stripes} stripe${rank.stripes === 1 ? '' : 's'}` : ''}`;
+  }
   function showView(id) {
     for (const v of document.querySelectorAll('.view')) v.classList.toggle('active', v.id === id);
-    const tab = id === 'tonight' || id === 'class' ? 'tonight' : id === 'stripes' ? 'stripes' : id === 'tabview' || id === 'closeout' ? 'tab' : 'members';
+    const tab = id === 'tonight' || id === 'class' ? 'tonight' : id === 'stripes' ? 'stripes' : id === 'away' ? 'away' : id === 'tabview' || id === 'closeout' ? 'tab' : 'members';
     for (const t of document.querySelectorAll('.tab[data-tab]')) t.classList.toggle('active', t.dataset.tab === tab);
     window.scrollTo(0, 0);
   }
@@ -315,7 +347,9 @@
     for (const r of data.rows) {
       const row = el('div', 'row');
       row.dataset.attendanceId = r.attendanceId;
-      row.append(el('span', 'check', '✓'), el('span', 'name', displayName(r)), el('span', 'time', fmtClock(r.checkedInAt)));
+      row.append(el('span', 'check', '✓'), el('span', 'name', displayName(r)));
+      if (r.rank) row.appendChild(el('span', 'tag', rankText(r.rank)));
+      row.appendChild(el('span', 'time', fmtClock(r.checkedInAt)));
       if (r.method === 'staff') row.appendChild(el('span', 'tag', 'staff'));
       if (r.statusAtCheckin === 'inactive') row.appendChild(el('span', 'tag warn', 'inactive'));
       if (r.waiver === false) row.appendChild(el('span', 'tag warn', 'no waiver'));
@@ -376,6 +410,10 @@
   }
 
   // ---------- stripes (§15.2) ----------
+  function sinceWhat(r) {
+    if (!r.lastAwardedOn) return 'their first class';
+    return r.lastKind === 'belt' ? 'their belt' : 'last stripe';
+  }
   async function loadStripes() {
     const list = $('stripes-list');
     list.innerHTML = '';
@@ -403,8 +441,9 @@
       row.dataset.id = r.id;
       row.append(
         el('span', 'name', `${r.first} ${r.last}`.trim()),
-        el('span', 'since', `${r.since} since ${r.lastAwardedOn ? 'last stripe' : 'their first class'}`),
+        el('span', 'since', `${r.since} since ${sinceWhat(r)}`),
       );
+      if (r.rank) row.appendChild(el('span', 'tag', rankText(r.rank)));
       if (r.worth > 1) row.appendChild(el('span', 'tag warn', `${r.worth} worth`));
       const award = el('button', 'award', 'Record stripe');
       award.type = 'button';
@@ -440,10 +479,59 @@
       row.dataset.id = r.id;
       row.append(
         el('span', 'name', `${r.first} ${r.last}`.trim()),
-        el('span', 'since', `${r.since} since ${r.lastAwardedOn ? 'last stripe' : 'their first class'}`),
+        el('span', 'since', `${r.since} since ${sinceWhat(r)}`),
         el('span', 'tag warn', `Next class makes ${r.since + 1}`),
       );
+      if (r.rank) row.insertBefore(el('span', 'tag', rankText(r.rank)), row.lastChild);
       list.appendChild(row);
+    }
+  }
+
+  // ---------- away (§15.5) ----------
+  async function loadAway() {
+    const list = $('away-list');
+    const never = $('away-never');
+    list.innerHTML = '';
+    never.innerHTML = '';
+    $('away-never-box').hidden = true;
+    let data;
+    try {
+      data = await api('/api/staff/away');
+    } catch (e) {
+      list.appendChild(el('div', 'empty', e.message));
+      return;
+    }
+    if (!data.enabled) {
+      $('away-rule').textContent = '';
+      $('away-note').textContent = '';
+      list.appendChild(el('div', 'empty', 'The away list is off.'));
+      return;
+    }
+    $('away-rule').textContent = `${data.days} days or more`;
+    $('away-note').textContent = 'Members with no class lately, longest away first. Tap a name for their history.';
+    if (data.away.length === 0) list.appendChild(el('div', 'empty', `Everyone has been in within ${data.days} days`));
+    const open = (r) => () => openMember({ id: r.id, first: r.first, last: r.last }).catch((e) => toast(e.message));
+    for (const r of data.away) {
+      const row = el('button', 'row');
+      row.type = 'button';
+      row.dataset.id = r.id;
+      row.append(
+        el('span', 'name', `${r.first} ${r.last}`.trim()),
+        el('span', 'tag', r.programLabels.join(' / ')),
+        el('span', 'time', `Last class ${fmtDate(r.lastDate)}`),
+        el('span', 'since', `${r.daysAway} days`),
+      );
+      row.addEventListener('click', open(r));
+      list.appendChild(row);
+    }
+    $('away-never-box').hidden = data.never.length === 0;
+    for (const r of data.never) {
+      const row = el('button', 'row');
+      row.type = 'button';
+      row.dataset.id = r.id;
+      row.append(el('span', 'name', `${r.first} ${r.last}`.trim()), el('span', 'tag', r.programLabels.join(' / ')));
+      row.addEventListener('click', open(r));
+      never.appendChild(row);
     }
   }
 
@@ -460,6 +548,7 @@
     const fact = (k, v, gold) => { const f = el('div', 'fact'); f.append(el('div', 'k', k), el('div', `v${gold ? ' gold' : ''}`, v)); facts.appendChild(f); };
     fact('Program', d.programLabels.join(' / ') || 'none');
     fact('Lifetime', `Class #${d.lifetime}`, true);
+    if (d.rank && d.rank.enabled && d.rank.rank) fact('Rank', rankText(d.rank.rank));
     fact('Status', d.active ? 'Active' : 'Inactive');
     fact('Waiver', d.waiver ? 'On file' : 'Missing', !d.waiver);
     if (d.payerLinked !== null && d.payerLinked !== undefined) {
@@ -469,6 +558,7 @@
     }
     fact('Roster synced', d.syncedAt ? `${fmtDate(d.syncedAt.slice(0, 10))} ${fmtClock(d.syncedAt)}` : 'never');
     fact('GHL rollup', d.rollupPending ? 'Pending tonight' : 'Up to date');
+    renderRankForm(d);
     renderPromotions(d, m);
     renderMemberTab(d, m);
     picking = {
@@ -494,6 +584,71 @@
     }
     showView('member');
   }
+  // Belt and stripe controls on the member screen (§15.4). Hidden when belts
+  // are off or migration 006 is pending; the stripe button follows §15.2.
+  function renderRankForm(d) {
+    const r = d.rank && d.rank.enabled ? d.rank : null;
+    $('member-rank').style.display = r ? '' : 'none';
+    $('member-stripe').style.display = d.canRecordStripe ? '' : 'none';
+    resetArmed($('rank-save'), 'Record belt');
+    resetArmed($('stripe-add'), 'Record stripe');
+    if (!r) return;
+    const belt = $('rank-belt');
+    belt.innerHTML = '';
+    for (const o of r.options) {
+      const opt = el('option', '', o.label);
+      opt.value = o.key;
+      belt.appendChild(opt);
+    }
+    if (r.rank && r.options.some((o) => o.key === r.rank.belt)) belt.value = r.rank.belt;
+    const stripes = $('rank-stripes');
+    stripes.innerHTML = '';
+    for (let i = 0; i <= 4; i += 1) {
+      const opt = el('option', '', i === 1 ? '1 stripe' : `${i} stripes`);
+      opt.value = String(i);
+      stripes.appendChild(opt);
+    }
+    stripes.value = String(Math.min(4, r.rank ? r.rank.stripes : 0));
+    $('rank-held').checked = false;
+  }
+  function resetArmed(button, label) {
+    button.classList.remove('confirm');
+    button.textContent = label;
+  }
+  // One tap arms, the second records, like every other write on this page.
+  function armed(button, label, confirmLabel) {
+    if (button.classList.contains('confirm')) return true;
+    button.classList.add('confirm');
+    button.textContent = confirmLabel;
+    setTimeout(() => resetArmed(button, label), 4000);
+    return false;
+  }
+  $('rank-save').addEventListener('click', async () => {
+    if (!picking || !armed($('rank-save'), 'Record belt', 'Confirm belt')) return;
+    try {
+      await post('/api/staff/promote', {
+        contactId: picking.m.id,
+        kind: 'belt',
+        belt: $('rank-belt').value,
+        stripes: Number($('rank-stripes').value),
+        starting: $('rank-held').checked,
+      });
+      toast(`Belt recorded for ${picking.first}`);
+      await openMember(picking.m);
+    } catch (e) {
+      toast(`Could not record: ${e.message}`);
+    }
+  });
+  $('stripe-add').addEventListener('click', async () => {
+    if (!picking || !armed($('stripe-add'), 'Record stripe', 'Confirm stripe')) return;
+    try {
+      await post('/api/staff/promote', { contactId: picking.m.id, kind: 'stripe' });
+      toast(`Stripe recorded for ${picking.first}`);
+      await openMember(picking.m);
+    } catch (e) {
+      toast(`Could not record: ${e.message}`);
+    }
+  });
   function renderPromotions(d, m) {
     const box = $('member-promotions');
     box.innerHTML = '';
@@ -506,9 +661,10 @@
       const row = el('div', 'row');
       row.append(
         el('span', 'time', fmtDate(p.awardedOn)),
-        el('span', 'name', p.kind === 'belt' ? 'Belt' : 'Stripe'),
+        el('span', 'name', p.kind === 'belt' ? `${p.beltLabel || 'Belt'}${p.stripes ? `, ${p.stripes} stripe${p.stripes === 1 ? '' : 's'}` : ''}` : 'Stripe'),
         el('span', 'time', `at class ${p.atClassCount}`),
       );
+      if (p.starting) row.appendChild(el('span', 'tag', 'already held'));
       if (i === 0) {
         const undo = el('button', 'undo', 'Undo');
         undo.type = 'button';
@@ -914,6 +1070,7 @@
     t.addEventListener('click', async () => {
       if (t.dataset.tab === 'tonight') { showView('tonight'); await loadTonight(); }
       else if (t.dataset.tab === 'stripes') { showView('stripes'); await loadStripes(); }
+      else if (t.dataset.tab === 'away') { showView('away'); await loadAway(); }
       else if (t.dataset.tab === 'tab') { showView('tabview'); await loadTab(); }
       else { showView('members'); $('member-search').focus(); }
     });

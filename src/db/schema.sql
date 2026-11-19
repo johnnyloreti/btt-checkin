@@ -52,7 +52,10 @@ CREATE TABLE IF NOT EXISTS promotions (
   awarded_on     TEXT NOT NULL,              -- "YYYY-MM-DD" ET
   at_class_count INTEGER NOT NULL,           -- attended classes at that moment
   note           TEXT,
-  created_at     TEXT NOT NULL               -- ISO UTC
+  created_at     TEXT NOT NULL,              -- ISO UTC
+  belt           TEXT,                       -- 006: belt key on a 'belt' row
+  stripes        INTEGER NOT NULL DEFAULT 0, -- 006: stripes already on that belt
+  starting       INTEGER NOT NULL DEFAULT 0  -- 006: 1 = a rank already held, not an award
 );
 
 CREATE INDEX IF NOT EXISTS idx_promotions_contact ON promotions (ghl_contact_id, created_at);

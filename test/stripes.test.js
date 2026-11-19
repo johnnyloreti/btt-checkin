@@ -180,7 +180,7 @@ test('undo removes only the most recent award', async () => {
   give('c_jack', 20);
   const jack = await id('c_jack');
   await call('/api/staff/promote', { method: 'POST', body: { contactId: jack } });
-  await call('/api/staff/promote', { method: 'POST', body: { contactId: jack, kind: 'belt' } });
+  await call('/api/staff/promote', { method: 'POST', body: { contactId: jack, kind: 'belt', belt: 'grey' } });
   assert.equal(DB.raw.prepare('SELECT COUNT(*) AS n FROM promotions').get().n, 2);
 
   const undone = await (await call('/api/staff/promote/undo', { method: 'POST', body: { contactId: jack } })).json();

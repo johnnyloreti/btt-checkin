@@ -202,6 +202,15 @@ The Stripes tab now has a second list, "One class away": kids at 6 classes since
 
 Kiosk drinks: Water $1, Hydrate $3 (was "LMNT"; same GHL product), Gatorade $2, Protein $4 (new GHL product `6aebadec04da892e4be5f656`, price `6aebadf61a455f8fe7fd0c99`, SKU `DRINK-PROTEIN`). Reload the iPad after deploying.
 
+## Belts and the Away tab, 2026-11-19
+
+Two things from the BJJLink review, both staff page only.
+
+- **Belts (§15.4).** Rank (belt and stripes) shows on the class roster, the Stripes rows and the member screen. Record a belt on the member screen; tick "They already hold this rank" for someone who walked in with one, so their class count is not reset. "Give a stripe now" is on the member screen too. Everyone reads as a white belt until a belt is recorded. The belt lists are the IBJJF ones in `wrangler.toml` (`BELTS_KIDS`, `BELTS_ADULT`); trim them if the gym uses fewer.
+- **Away tab (§15.5).** Members with no class in 14 days or more (`AWAY_DAYS`), longest away first, and a second list of members who never checked in.
+- **Migration:** `src/db/migrations/006_belts.sql`, once. The deploy survives either order; until it runs, rank is hidden and `/health` says so.
+- **GHL:** the contact field `payer_contact_id` now exists (created 2026-11-19, id `HZGvoCj68LOGxlmrCE2Z`). It is empty on every contact; the parent links still have to be filled.
+
 ## Still open after go-live
 
 - Rotate `STAFF_PIN`; the first one was pasted into a chat.
@@ -360,4 +369,4 @@ Cloudflare, replace all of this with a Custom Domain on the Worker.
 
 ## Not built (V2, per §10 and §13)
 
-Family view, member portal, QR codes, GHL calendar sync, notes, class billing and dues. (Stripes and belts came in as an approved V2 item, §15.2, and are built. The drink tab, §15.3, is built through the close-out.) `schedule.json` stays the source of truth for classes until V1.1 replaces it with the GHL calendar sync.
+Family view, member portal, QR codes, GHL calendar sync, notes, class billing and dues. (Stripes came in as an approved V2 item, §15.2, belts as §15.4 and the Away tab as §15.5; all three are built. The drink tab, §15.3, is built through the close-out.) `schedule.json` stays the source of truth for classes until V1.1 replaces it with the GHL calendar sync.

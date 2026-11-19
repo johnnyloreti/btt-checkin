@@ -1,4 +1,4 @@
-// promotions.js — stripe tracking (§15.2).
+// promotions.js — stripe tracking (§15.2) and belts (§15.4).
 //
 // The tab surfaces who has crossed a threshold. It never says a promotion is
 // owed: class count is one input, the instructor decides. Wording in the UI
@@ -9,7 +9,7 @@
 // promotion, or all attended classes if they have none.
 
 import { parseList } from './roster.js';
-import { hasPromotionsTable } from './schema-caps.js';
+import { hasPromotionsTable, hasBeltColumns } from './schema-caps.js';
 import { localParts } from './time.js';
 
 export const DEFAULT_STRIPE_CLASSES = 7;
@@ -27,6 +27,107 @@ export function stripeConfig(env = {}) {
 
 export function stripesEnabled(env) {
   return stripeConfig(env).programs.length > 0;
+}
+
+// ---------- belts (§15.4) ----------
+// IBJJF order. The first belt in a list is what a member holds until a belt
+// is recorded for them. Both lists are config (BELTS_KIDS, BELTS_ADULT), so a
+// different system is an edit and a deploy, not a code change.
+export const DEFAULT_BELTS_KIDS = [
+  'white',
+  'grey-white', 'grey', 'grey-black',
+  'yellow-white', 'yellow', 'yellow-black',
+  'orange-white', 'orange', 'orange-black',
+  'green-white', 'green', 'green-black',
+];
+export const DEFAULT_BELTS_ADULT = ['white', 'blue', 'purple', 'brown', 'black'];
+export const MAX_STRIPES = 12;
+
+/** The two belt lists. An unset var uses the default; a blank one is empty. */
+export function beltConfig(env = {}) {
+  const list = (raw, fallback) => (raw === undefined || raw === null ? fallback : parseList(raw));
+  return { kids: list(env.BELTS_KIDS, DEFAULT_BELTS_KIDS), adult: list(env.BELTS_ADULT, DEFAULT_BELTS_ADULT) };
+}
+
+/** Both lists blank turns belt tracking off. */
+export function beltsEnabled(env) {
+  const cfg = beltConfig(env);
+  return cfg.kids.length + cfg.adult.length > 0;
+}
+
+/** "grey-white" reads "Grey-white". */
+export function beltLabel(key) {
+  const k = String(key || '');
+  return k ? k.charAt(0).toUpperCase() + k.slice(1) : '';
+}
+
+/**
+ * The belts on offer for a member: the kids list for a kids program, the
+ * adult list for anyone else, both for a member in both.
+ */
+export function beltOptionsFor(programs, cfg) {
+  const list = Array.isArray(programs) ? programs.map((p) => String(p).toLowerCase()) : [];
+  const kid = list.some((p) => p.startsWith('kids-'));
+  const adult = list.some((p) => !p.startsWith('kids-')) || !kid;
+  const out = [];
+  for (const b of [...(kid ? cfg.kids : []), ...(adult ? cfg.adult : [])]) if (!out.includes(b)) out.push(b);
+  return out;
+}
+
+/**
+ * A member's rank from their promotions, oldest first. A belt row sets the
+ * belt and the stripes already on it; each stripe row after it adds one.
+ * `recorded` is false while the belt is only the assumed first one.
+ */
+export function rankFrom(promos, programs, cfg) {
+  const options = beltOptionsFor(programs, cfg);
+  let belt = options[0] || null;
+  let stripes = 0;
+  let recorded = false;
+  for (const p of promos || []) {
+    if (p.kind === 'belt') {
+      if (p.belt) {
+        belt = String(p.belt);
+        recorded = true;
+      }
+      stripes = Math.max(0, Number(p.stripes) || 0);
+    } else if (p.kind === 'stripe') {
+      stripes += 1;
+    }
+  }
+  if (!belt) return null;
+  return { belt, label: `${beltLabel(belt)} belt`, stripes, recorded };
+}
+
+/** Whether rank can be shown at all: feature on, table and columns present. */
+export async function beltsReady(env) {
+  return beltsEnabled(env) && (await hasPromotionsTable(env)) && (await hasBeltColumns(env));
+}
+
+/**
+ * Rank for each member given, as a Map by contact id. Empty when belts are
+ * off or migration 006 is pending, so callers simply show nothing.
+ *
+ * members: [{ ghl_contact_id, programs: [key] }]
+ */
+export async function ranksFor(env, members) {
+  const out = new Map();
+  if (!members.length || !(await beltsReady(env))) return out;
+  const cfg = beltConfig(env);
+  const ids = [...new Set(members.map((m) => m.ghl_contact_id))];
+  const byContact = new Map(ids.map((id) => [id, []]));
+  // D1 caps bound parameters at 100 a statement.
+  for (let i = 0; i < ids.length; i += 80) {
+    const chunk = ids.slice(i, i + 80);
+    const { results } = await env.DB.prepare(
+      `SELECT ghl_contact_id, kind, belt, stripes FROM promotions
+        WHERE ghl_contact_id IN (${chunk.map(() => '?').join(', ')})
+        ORDER BY created_at ASC, id ASC`,
+    ).bind(...chunk).all();
+    for (const r of results) byContact.get(r.ghl_contact_id).push(r);
+  }
+  for (const m of members) out.set(m.ghl_contact_id, rankFrom(byContact.get(m.ghl_contact_id), m.programs, cfg));
+  return out;
 }
 
 /**
@@ -85,12 +186,17 @@ function countSince(members, lastByContact, cfg) {
   return rows;
 }
 
-/** Most recent promotion per contact, as a Map. */
+/**
+ * Most recent award per contact, as a Map. A row that only set a rank the
+ * member already held (starting = 1, §15.4) is not an award and is skipped,
+ * so it never moves the class count toward the next stripe.
+ */
 export async function lastPromotions(env) {
   if (!(await hasPromotionsTable(env))) return new Map();
+  const awards = (await hasBeltColumns(env)) ? 'WHERE starting = 0' : '';
   const { results } = await env.DB.prepare(
     `SELECT ghl_contact_id, kind, awarded_on, at_class_count, created_at
-       FROM promotions ORDER BY created_at ASC, id ASC`,
+       FROM promotions ${awards} ORDER BY created_at ASC, id ASC`,
   ).all();
   const map = new Map();
   for (const r of results) map.set(r.ghl_contact_id, r); // later rows win
@@ -127,23 +233,41 @@ export async function stripeCandidates(env) {
     return { enabled: false, threshold: cfg.threshold, rows: [], upNext: [], pendingMigration: true };
   }
   const [members, last] = await Promise.all([membersWithCounts(env), lastPromotions(env)]);
-  return {
-    enabled: true,
-    threshold: cfg.threshold,
-    rows: eligibleForStripe(members, last, cfg),
-    upNext: upNextForStripe(members, last, cfg),
-  };
+  const rows = eligibleForStripe(members, last, cfg);
+  const upNext = upNextForStripe(members, last, cfg);
+  // Rank beside the count (§15.4), so a kid on four stripes reads as such.
+  const ranks = await ranksFor(env, [...rows, ...upNext]);
+  for (const r of [...rows, ...upNext]) r.rank = ranks.get(r.ghl_contact_id) || null;
+  return { enabled: true, threshold: cfg.threshold, rows, upNext };
 }
 
 /**
  * Record an award. Stores the member's attended count at this moment, which
  * is what the next interval counts from. Returns { ok, ... } or throws with
  * a .status for the router.
+ *
+ * A belt row (§15.4) also carries the belt, the stripes already on it, and
+ * `starting` for a rank the member held before it was recorded here.
  */
-export async function recordPromotion(env, schedule, { contactId, kind = 'stripe', note = null, now = new Date() }) {
+export async function recordPromotion(env, schedule, { contactId, kind = 'stripe', note = null, belt = null, stripes = 0, starting = false, now = new Date() }) {
   if (!KINDS.includes(kind)) throw Object.assign(new Error(`kind must be one of ${KINDS.join(', ')}`), { status: 400 });
   if (!(await hasPromotionsTable(env))) {
     throw Object.assign(new Error('promotions table missing: run src/db/migrations/003_promotions.sql'), { status: 503 });
+  }
+  const isBelt = kind === 'belt';
+  let beltKey = null;
+  let onBelt = 0;
+  if (isBelt) {
+    if (!(await hasBeltColumns(env))) {
+      throw Object.assign(new Error('belt columns missing: run src/db/migrations/006_belts.sql'), { status: 503 });
+    }
+    const cfg = beltConfig(env);
+    beltKey = String(belt || '').trim().toLowerCase();
+    if (![...cfg.kids, ...cfg.adult].includes(beltKey)) throw Object.assign(new Error('unknown belt'), { status: 400 });
+    onBelt = Number(stripes ?? 0);
+    if (!Number.isInteger(onBelt) || onBelt < 0 || onBelt > MAX_STRIPES) {
+      throw Object.assign(new Error(`stripes must be a whole number from 0 to ${MAX_STRIPES}`), { status: 400 });
+    }
   }
   const count = await env.DB.prepare(
     "SELECT COUNT(*) AS n FROM attendance WHERE ghl_contact_id = ? AND status = 'attended'",
@@ -152,12 +276,21 @@ export async function recordPromotion(env, schedule, { contactId, kind = 'stripe
     .first();
   const atClassCount = Number(count?.n ?? 0);
   const awardedOn = localParts(now, env.TZ || schedule.timezone).date;
-  const res = await env.DB.prepare(
-    'INSERT INTO promotions (ghl_contact_id, kind, awarded_on, at_class_count, note, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-  )
-    .bind(contactId, kind, awardedOn, atClassCount, note ? String(note).slice(0, 200) : null, now.toISOString())
-    .run();
-  return { ok: true, id: Number(res.meta?.last_row_id ?? 0), kind, awardedOn, atClassCount };
+  const cleanNote = note ? String(note).slice(0, 200) : null;
+  const res = isBelt
+    ? await env.DB.prepare(
+      'INSERT INTO promotions (ghl_contact_id, kind, awarded_on, at_class_count, note, created_at, belt, stripes, starting) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    )
+      .bind(contactId, kind, awardedOn, atClassCount, cleanNote, now.toISOString(), beltKey, onBelt, starting ? 1 : 0)
+      .run()
+    : await env.DB.prepare(
+      'INSERT INTO promotions (ghl_contact_id, kind, awarded_on, at_class_count, note, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+    )
+      .bind(contactId, kind, awardedOn, atClassCount, cleanNote, now.toISOString())
+      .run();
+  const out = { ok: true, id: Number(res.meta?.last_row_id ?? 0), kind, awardedOn, atClassCount };
+  if (isBelt) Object.assign(out, { belt: beltKey, stripes: onBelt, starting: Boolean(starting) });
+  return out;
 }
 
 /** Undo the member's most recent award. For a mis-tap at the desk. */
@@ -178,11 +311,45 @@ export async function undoLastPromotion(env, contactId) {
 /** One member's award history, newest first. */
 export async function promotionHistory(env, contactId) {
   if (!(await hasPromotionsTable(env))) return [];
+  const belts = await hasBeltColumns(env);
   const { results } = await env.DB.prepare(
-    `SELECT id, kind, awarded_on, at_class_count, note FROM promotions
+    `SELECT id, kind, awarded_on, at_class_count, note${belts ? ', belt, stripes, starting' : ''} FROM promotions
       WHERE ghl_contact_id = ? ORDER BY created_at DESC, id DESC`,
   )
     .bind(contactId)
     .all();
-  return results.map((r) => ({ id: r.id, kind: r.kind, awardedOn: r.awarded_on, atClassCount: Number(r.at_class_count), note: r.note }));
+  return results.map((r) => ({
+    id: r.id,
+    kind: r.kind,
+    awardedOn: r.awarded_on,
+    atClassCount: Number(r.at_class_count),
+    note: r.note,
+    belt: belts && r.belt ? r.belt : null,
+    beltLabel: belts && r.belt ? `${beltLabel(r.belt)} belt` : null,
+    stripes: belts ? Number(r.stripes) || 0 : 0,
+    starting: belts ? Number(r.starting) === 1 : false,
+  }));
+}
+
+/**
+ * What the member screen needs for rank: the current rank and the belts on
+ * offer. `enabled: false` hides the whole block (feature off, or migration
+ * 006 pending).
+ */
+export async function memberRank(env, member) {
+  if (!(await beltsReady(env))) return { enabled: false };
+  let programs = [];
+  try {
+    programs = JSON.parse(member.programs);
+  } catch {
+    programs = [];
+  }
+  const cfg = beltConfig(env);
+  const ranks = await ranksFor(env, [{ ghl_contact_id: member.ghl_contact_id, programs }]);
+  return {
+    enabled: true,
+    rank: ranks.get(member.ghl_contact_id) || null,
+    options: beltOptionsFor(programs, cfg).map((key) => ({ key, label: `${beltLabel(key)} belt` })),
+    maxStripes: MAX_STRIPES,
+  };
 }

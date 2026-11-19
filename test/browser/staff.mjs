@@ -237,6 +237,69 @@ await step('the award shows on the member screen and undo removes it', async () 
   assert.equal(env.DB.raw.prepare('SELECT COUNT(*) AS n FROM promotions').get().n, 0);
 });
 
+await step('away: who has gone quiet, longest first, and a tap opens the member', async () => {
+  // Jack's last real class was Aug 8 (today's add was removed): 28 days.
+  await page.click('.tab[data-tab="away"]');
+  await page.waitForSelector('#away-list .row');
+  assert.match(await page.locator('#away-rule').textContent(), /14 days or more/);
+  const rows = await page.locator('#away-list .row').allTextContents();
+  assert.equal(rows.length, 1, `expected one away, got ${rows.length}`);
+  assert.match(rows[0], /Jack Silva/);
+  assert.match(rows[0], /Kids 6-9/);
+  assert.match(rows[0], /Last class Sat, Aug 8/);
+  assert.match(rows[0], /28 days/);
+  // Emma was in today, so she is on neither list.
+  assert.equal(await page.locator('#away-never-box').isVisible(), true);
+  const never = await page.locator('#away-never .row').allTextContents();
+  assert.ok(never.length >= 1);
+  assert.ok(!never.some((t) => /Emma Jones|Jack Silva/.test(t)));
+  await page.screenshot({ path: join(OUT, 'staff-away.png') });
+  await page.click('#away-list .row');
+  await page.waitForSelector('#member.active');
+  assert.equal(await page.locator('#member-title').textContent(), 'Jack Silva');
+});
+
+await step('belts: record a rank on the member screen, add a stripe, and see it on the roster', async () => {
+  // Still on Jack's member screen. White until told otherwise.
+  assert.equal(await page.locator('#member-rank').isVisible(), true);
+  assert.match(await page.locator('#member-facts').textContent(), /Rank\s*White belt/);
+  assert.equal(await page.locator('#rank-belt option').count(), 13, 'a kid is offered the kids belts');
+  await page.selectOption('#rank-belt', 'grey');
+  await page.selectOption('#rank-stripes', '2');
+  await page.check('#rank-held');
+  await page.click('#rank-save');
+  assert.equal(await page.locator('#rank-save').textContent(), 'Confirm belt');
+  assert.equal(env.DB.raw.prepare('SELECT COUNT(*) AS n FROM promotions').get().n, 0, 'one tap only arms');
+  await page.click('#rank-save');
+  await page.waitForFunction(() => /Grey belt, 2 stripes/.test(document.getElementById('member-facts').textContent));
+  const history = await page.locator('#member-promotions').textContent();
+  assert.match(history, /Grey belt, 2 stripes/);
+  assert.match(history, /already held/);
+  const stored = env.DB.raw.prepare('SELECT kind, belt, stripes, starting FROM promotions').all();
+  assert.deepEqual(stored.map((r) => [r.kind, r.belt, r.stripes, r.starting]), [['belt', 'grey', 2, 1]]);
+
+  // A stripe given on the spot adds to the belt.
+  await page.click('#stripe-add');
+  assert.equal(await page.locator('#stripe-add').textContent(), 'Confirm stripe');
+  await page.click('#stripe-add');
+  await page.waitForFunction(() => /Grey belt, 3 stripes/.test(document.getElementById('member-facts').textContent));
+  await page.screenshot({ path: join(OUT, 'staff-member-belt.png') });
+
+  // The class roster shows rank beside the name. An earlier step left the
+  // date bar on Sunday; step back to Saturday and put it back after.
+  await page.click('.tab[data-tab="tonight"]');
+  await page.click('#prev-day');
+  await page.waitForSelector('#tonight-list .row[data-name="Kids 6-9"]');
+  await page.click('#tonight-list .row[data-name="Kids 6-9"]');
+  await page.waitForSelector('#class-list .row');
+  assert.match(await page.locator('#class-list .row').first().textContent(), /Emma Jones.*White belt/);
+  await page.screenshot({ path: join(OUT, 'staff-class-rank.png') });
+  await page.click('#class-back');
+  await page.waitForSelector('#tonight.active');
+  await page.click('#next-day');
+  await page.waitForFunction(() => /No classes this day/.test(document.getElementById('tonight-list').textContent));
+});
+
 await step('add a class from the member screen: pick a day, see only their classes', async () => {
   await page.click('.tab[data-tab="members"]');
   await page.fill('#member-search', 'emma');

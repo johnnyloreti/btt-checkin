@@ -133,7 +133,7 @@ Kids 6-9  11:00 AM
 
 **Add a class** (on the member screen, added 2026-09-24) is the way in when one person was missed rather than a whole class: three taps instead of walking the date bar back and opening the class. Pick the day (the picker is bounded by `STAFF_BACKDATE_DAYS`, so it never offers a day the server would refuse), see only that member's classes for it, tap one. A class they are already on is marked, and tapping it anyway is a harmless duplicate. Open mat is always offered. If nothing in their program runs that day, that day's other classes are listed rather than none, because staff know better than the program tag does.
 
-No belt tracking, no notes, no billing in V1. Promotions since arrived as an approved V2 item (§15.2).
+No belt tracking, no notes, no billing in V1. Promotions since arrived as an approved V2 item (§15.2), belts as §15.4, and the Away tab as §15.5.
 
 ---
 
@@ -284,6 +284,7 @@ Vars in `wrangler.toml`:
 - `CHECKIN_EARLY_MIN = "180"` and `CHECKIN_LATE_MIN = "180"` (§2 window, minutes)
 - `KIOSK_BACKDATE_DAYS = "3"` and `STAFF_BACKDATE_DAYS = "30"` (§3 backdating, whole days)
 - `TAB_ITEMS`, `TAB_PROGRAMS`, `TAB_MIN_CENTS`, `TAB_MAX_ROLL_DAYS`, `TAB_AUTO_HOUR` (§15.3 drink tab; empty `TAB_ITEMS` turns it off, empty `TAB_AUTO_HOUR` makes charging button-only)
+- `BELTS_KIDS`, `BELTS_ADULT` (§15.4 belt lists; both blank turns belts off) and `AWAY_DAYS` (§15.5; "0" turns the Away tab off)
 - `WAIVER_TAG`, `WAIVER_FIELD` (§15.1), and `PAYER_FIELD`, `WAIVER_PAYER_FIELD` (§15.1 kids, Phase 1b; either blank sends every reminder to the member's own contact)
 
 `.dev.vars.example` committed; `.dev.vars` gitignored. Parser must handle CRLF and BOM.
@@ -416,6 +417,7 @@ So, for any migration from here on:
   - Unverified: that `GET /contacts/` carries each contact's `customFields`. If it does not, `payerLinks.field` reads "unreadable: the contact list carries no custom fields" and every kid falls back as before.
   - **Johnny's GHL side:** the contact field `waiver_reminder_for` (single line text), and a workflow "Check-In: Kid waiver reminder": trigger Contact Changed on that field, an If/Else "field is not empty" guard, then the SMS or email to the contact (the parent) naming `{{contact.waiver_reminder_for}}` and the waiver link. The btt-ops side must fill `payer_contact_id` on each kid.
   - **Done 2026-09-29 by a Claude browser pass:** field created, key `contact.waiver_reminder_for` confirmed after reload, in the "Waiver" folder. Workflow "Check-In: Kid waiver reminder" published: Contact Changed on that field, re-entry on, If/Else "has value", then SMS and email (matching the adult waiver workflow), subject "Waiver needed at BTT Bridgewater", link to the public "BTT Bridgewater Member Participation Agreement v1.0". Not fired with a real send. **`payer_contact_id` does not exist in GHL yet**, so no kid is linked and every kid falls back to their own contact until it is created and filled.
+  - **`payer_contact_id` created 2026-11-19** through the HighLevel connector at Johnny's instruction: single line text, key `contact.payer_contact_id`, id `HZGvoCj68LOGxlmrCE2Z`. Empty on every contact until the parent links are filled, so every kid still falls back to their own contact.
   - **A parent's signature covers the kid (Johnny, 2026-09-29):** the one agreement covers adults and children; for a kid, the parent is the account holder and signer, names the child as participant, and signs on their behalf. So the signed copy and `WAIVER_TAG` land on the **parent's** contact. **Built the same day:** the roster sync counts a kid as signed when the kid's linked payer carries `WAIVER_TAG` **and that payer does not train here** (is not a member by the §6 rules, e.g. a `program:none` parent). A training parent's tag may be their own agreement as the participant, so it proves nothing about the kid; staff tag that kid by hand. When links cannot be read in a sync, the links stored last time still count, so a failed read never flips a kid to "no waiver". The sync detail carries `waiverViaPayer` (how many kids are signed this way).
   - **Known gap:** the tag does not say which child an agreement names. A non-training parent who signed for one child counts as having signed for every child linked to them. Fine for one-child families; for siblings, staff should check the signed copy.
 
@@ -677,3 +679,30 @@ No refunds, no voids, no deletes, no other write. `test/write-scanner.test.js` e
 
 - **Phase 1b, kids billed to a parent.** The waiver half is built (2026-09-29, §15.1): the roster sync already reads and stores `payer_contact_id`. The billing half below is not built. The roster sync reads a contact custom field `payer_contact_id` on each kid (the btt-ops side creates and fills it). A kid with a payer sees the drink row; the PIN pad asks for the **parent's** PIN; the purchase is recorded with `buyer` = kid and `payer` = parent. A kid with no `payer_contact_id` never sees the drink row. The 14-year-old in the adult class becomes eligible here, billed to the parent. The waiver nudge (§15.1) should also go to the payer here.
 - **Phase 2, merchandise.** A "Shop" button on the kiosk home screen. Items come from a GHL product collection rather than `tab-items.json`, including variants (sizes) and stock. A parent who has already checked a kid in picks an item and size, enters their PIN, and it goes on the same tab. Keep item handling data-driven so Phase 2 swaps the source, not the flow.
+
+### 15.4 Belt tracking (approved 2026-11-19)
+
+Johnny, after reviewing BJJLink: rank should show wherever staff look at a class. A member's rank is a belt plus the stripes on it, read from the same `promotions` table the stripe tab writes.
+
+**Rank.** The belt is the most recent belt row's; until one is recorded it is the first belt in the member's list (white), and the member screen shows it without having to set anyone up. Stripes are the stripes that belt row carried plus one for each stripe row after it. A new belt starts at the stripes recorded with it, normally zero.
+
+**Where it shows.** Beside each name on the class roster, on the Stripes rows, and as a Rank fact on the member screen.
+
+**Recording, on the member screen.** Pick a belt and the stripes on it, two taps. A belt is a promotion: like a stripe it starts the next class interval. Ticking "They already hold this rank" records it as a starting rank (`starting = 1`) for a member who walked in with one: it sets what shows and leaves the class count alone. "Give a stripe now" records a stripe for anyone, eligible or not, because the instructor decides (§15.2). Undo removes the most recent row, as before.
+
+**Config in `wrangler.toml`:** `BELTS_KIDS` and `BELTS_ADULT`, in order. A member in a kids program is offered the kids list, anyone else the adult list, a member in both gets both. The lists ship as the IBJJF ones (13 kids belts; white, blue, purple, brown, black) and are unconfirmed for this gym: Johnny edits them if BTT Bridgewater uses fewer. Both blank turns belts off; stripes are unaffected.
+
+**Schema:** migration `src/db/migrations/006_belts.sql` adds `belt`, `stripes` and `starting` to `promotions`. Per the §15.1 rule, `hasBeltColumns` in `src/schema-caps.js` guards every query that names them: before the migration rank is hidden everywhere, a belt is refused with the filename, stripes keep working, and `/health` goes `ok: false` naming the file. Nothing on the check-in path reads these columns.
+
+**Not built.** No belt in GHL, no promotion criteria beyond the class count, no belt on the kiosk.
+
+### 15.5 Away tab (approved 2026-11-19)
+
+From the same review: staff should see who has gone quiet before they are gone. A staff tab, **Away**, with two lists of active members:
+
+- **Away:** attended before, and their last class was `AWAY_DAYS` (14) or more days ago. Longest away first. Shows the program, the date of the last class and the days since. A tap opens the member.
+- **Never checked in:** on the roster with no attended class. This is also where a parent tagged as a member but not `program:none` shows up.
+
+Days are whole ET calendar days from the class date to today. A removed check-in is not a class. `AWAY_DAYS = "0"` turns the tab's lists off. No migration, no GHL call, nothing on the kiosk.
+
+**Not built:** the win-back message. `attendance_last` is already on every contact (§6), so a GHL workflow on that field can send it; Johnny owns the workflow and the message.
