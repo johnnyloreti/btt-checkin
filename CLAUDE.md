@@ -290,6 +290,7 @@ Vars in `wrangler.toml`:
 - `TAB_ITEMS`, `TAB_PROGRAMS`, `TAB_MIN_CENTS`, `TAB_MAX_ROLL_DAYS`, `TAB_AUTO_HOUR` (§15.3 drink tab; empty `TAB_ITEMS` turns it off, empty `TAB_AUTO_HOUR` makes charging button-only)
 - `BELTS_KIDS`, `BELTS_ADULT` (§15.4 belt lists; both blank turns belts off) and `AWAY_DAYS` (§15.5; "0" turns the Away tab off)
 - `PROGRESS_PAGE`, `PROGRESS_FIELD` (§15.7; "off" removes the page, a blank field leaves staff with Copy link only) and `LESSON_NOTES` (§15.8; "off" hides lesson notes)
+- `FAMILY_VIEW` (§15.10; "on" shows the Family box on the staff member screen, anything else hides it; ships "off")
 - `WAIVER_TAG`, `WAIVER_FIELD` (§15.1), and `PAYER_FIELD`, `WAIVER_PAYER_FIELD` (§15.1 kids, Phase 1b; either blank sends every reminder to the member's own contact)
 
 `.dev.vars.example` committed; `.dev.vars` gitignored. Parser must handle CRLF and BOM.
@@ -785,3 +786,13 @@ What a right guess gets: one family's progress page, and the knowledge of a PIN 
 **Routes, all public and rate-limited:** `GET /member`, `GET /api/member/options`, `POST /api/member/login`, `POST /api/member/link`, `POST /api/member/pin-link`. `PROGRESS_PAGE = "off"` removes them. PIN login needs the tab's tables and `PIN_PEPPER`; without them the page offers the text link only. No migration.
 
 **Depends on Johnny's GHL workflow** "Check-In: Progress link" (§15.7) for the text link to arrive.
+
+### 15.10 Family box on the staff member screen (built 2026-11-19, **not yet approved, ships off**)
+
+Johnny, going to bed on 2026-11-19: "Propose a plan to continue the build and keep yourself busy." Family view was on the plan Claude posted before starting. It is on the V2 list in §10, and Johnny has not said yes to it, so it is built and tested but **switched off**: `FAMILY_VIEW = "off"` in `wrangler.toml`. A deploy carries the code and changes nothing a person sees. When Johnny approves it, set it to `"on"` and change this heading to say approved, with the date. If he does not want it, the commit can be reverted on its own.
+
+**What it is.** A "Family" list on the staff member screen: the account holder if they train, and every member linked to the same parent through `payer_contact_id` (§15.1). Each row shows name, program, rank, classes in the last 30 days, the date of the last class, and tags for no waiver, inactive, parent and "this member". A tap on anyone else opens their screen. A member on their own has no list.
+
+**What it cannot show.** A parent who does not train is not in `members` (§6, `program:none`), so D1 has no name for them. The list says "a parent is on file and does not train here" and stops there. Looking the name up would be a GHL call on every member screen; not built.
+
+**Rules it keeps.** Staff-only, read-only, no GHL call, no migration, nothing on the kiosk. Ids in the response are the kiosk's opaque ones; a contact id never leaves the Worker. Removed check-ins are not classes. Before migration 005 there are no links to read and the box is off; before 006 it lists without ranks. `src/family.js`, `test/family.test.js`.

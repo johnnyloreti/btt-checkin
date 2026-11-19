@@ -26,6 +26,7 @@ import { recordCheckin } from './checkin.js';
 import { today, classRoster, voidAttendance, memberHistory, awayList, trends } from './staff.js';
 import { lessonsEnabled, lessonFor, lessonsOn, weekPlan, savePlan, saveNote } from './lessons.js';
 import { progressEnabled, progressFieldKey, progressPage, progressLinkFor, writeProgressLink, linkContactFor } from './progress.js';
+import { household } from './family.js';
 import { memberLogin, linkAllowance, recordLinkSend, pinLinksToday, WEB_PIN_LINKS_PER_DAY } from './member.js';
 import { localParts, localDayBounds } from './time.js';
 
@@ -657,6 +658,7 @@ export function createApp(schedule, deps = defaultDeps(), opts = {}) {
               promotions: await promotionHistory(env, member.ghl_contact_id),
               rank: await memberRank(env, member),
               progress: await memberProgressLink(env, member, url),
+              family: await household(env, schedule, member, now()),
               canRecordStripe: stripesEnabled(env) && (await hasPromotionsTable(env)),
               tab,
             });

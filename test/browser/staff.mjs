@@ -460,6 +460,43 @@ await step('progress page: staff copy or text the link; the page shows the membe
   await phoneCtx.close();
 });
 
+await step('family: siblings listed on the member screen, a tap moves between them, and it is off unless switched on', async () => {
+  const openJack = async () => {
+    await page.click('.tab[data-tab="members"]');
+    await page.fill('#member-search', 'jack');
+    await page.waitForSelector('#member-tiles .tile');
+    await page.click('#member-tiles .tile:has-text("Jack Silva")');
+    await page.waitForFunction(() => document.getElementById('member').classList.contains('active') && document.getElementById('member-title').textContent === 'Jack Silva');
+  };
+  const link = (parent) => env.DB.raw.prepare("UPDATE members SET payer_contact_id = ? WHERE ghl_contact_id IN ('c_jack', 'c_emma')").run(parent);
+  link('PARENTcontact0000001');
+  // Linked, but the switch is off: no box.
+  await openJack();
+  assert.equal(await page.locator('#member-family').isVisible(), false);
+
+  env.FAMILY_VIEW = 'on';
+  await openJack();
+  await page.waitForSelector('#family-list .row');
+  assert.equal(await page.locator('#family-list .row').count(), 2);
+  assert.match(await page.locator('#family-sub').textContent(), /a parent is on file and does not train here/);
+  const jack = page.locator('#family-list .row.self');
+  assert.match(await jack.textContent(), /Jack Silva.*Kids 6-9, Grey belt, 3 stripes.*this member/s);
+  const emma = page.locator('#family-list button.row');
+  assert.match(await emma.textContent(), /Emma Jones.*Kids 6-9, White belt/s);
+  await page.screenshot({ path: join(OUT, 'staff-member-family.png') });
+
+  // A tap on the sibling opens her screen, with her marked instead.
+  await emma.click();
+  await page.waitForFunction(() => document.getElementById('member-title').textContent === 'Emma Jones');
+  await page.waitForFunction(() => /Emma Jones/.test(document.querySelector('#family-list .row.self')?.textContent || ''));
+  assert.equal(await page.locator('#family-list button.row').count(), 1);
+
+  // Put things back for the steps that follow.
+  link(null);
+  await openJack();
+  assert.equal(await page.locator('#member-family').isVisible(), false, 'on his own again: no box');
+});
+
 await step('add a class from the member screen: pick a day, see only their classes', async () => {
   await page.click('.tab[data-tab="members"]');
   await page.fill('#member-search', 'emma');

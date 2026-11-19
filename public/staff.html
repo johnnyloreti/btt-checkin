@@ -34,6 +34,10 @@
   .row .count { color: var(--gold); font-weight: 600; font-variant-numeric: tabular-nums; }
   .row .tag { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); border: 1px solid var(--line); padding: 3px 8px; border-radius: 999px; }
   .row .tag.warn { color: var(--gold); border-color: var(--gold); }
+  .row .who { flex: 1; min-width: 0; }
+  .row .who b { display: block; font-weight: 600; }
+  .row .who small { display: block; color: var(--muted); font-size: 14px; margin-top: 3px; }
+  .row.self { border-color: var(--gold); }
   .row .tag.gold { color: #1a1607; background: var(--gold); border-color: var(--gold); }
   .row.sub { margin-left: 28px; padding: 10px 16px; font-size: 16px; background: transparent; }
   .row .status { color: var(--muted); font-size: 15px; }
@@ -214,6 +218,10 @@
         <button class="undo" id="progress-copy" type="button">Copy link</button>
         <button class="award" id="progress-text" type="button">Text it</button>
       </div>
+    </div>
+    <div id="member-family" style="display:none">
+      <h2 style="font-size:22px">Family <span class="sub" id="family-sub"></span></h2>
+      <div id="family-list" class="list" style="margin-bottom:14px"></div>
     </div>
     <button class="btn" id="member-add-class" type="button">+ Add a class</button>
     <div id="member-tab" style="display:none">
@@ -772,6 +780,7 @@
     fact('Roster synced', d.syncedAt ? `${fmtDate(d.syncedAt.slice(0, 10))} ${fmtClock(d.syncedAt)}` : 'never');
     fact('GHL rollup', d.rollupPending ? 'Pending tonight' : 'Up to date');
     renderProgressRow(d);
+    renderFamily(d);
     renderRankForm(d);
     renderPromotions(d, m);
     renderMemberTab(d, m);
@@ -801,6 +810,34 @@
   // The member's progress page (§15.7): copy the link, or have GHL text it
   // to the member, or to the parent when one is linked.
   let progressUrl = '';
+  // The household (§15.10): a parent and the kids linked to them. A tap on
+  // anyone else opens their screen. Hidden for a member on their own.
+  function renderFamily(d) {
+    const f = d.family && d.family.enabled ? d.family : null;
+    const people = f ? f.people : [];
+    $('member-family').style.display = people.length > 1 ? '' : 'none';
+    const list = $('family-list');
+    list.innerHTML = '';
+    if (people.length <= 1) return;
+    $('family-sub').textContent = f.parent === 'on_file' ? 'a parent is on file and does not train here' : '';
+    for (const p of people) {
+      const row = el(p.self ? 'div' : 'button', `row${p.self ? ' self' : ''}`);
+      if (!p.self) row.type = 'button';
+      const who = el('span', 'who');
+      who.appendChild(el('b', '', `${p.first} ${p.last}`.trim()));
+      const bits = [p.programLabels.join(' / ') || 'no program', rankText(p.rank)].filter(Boolean);
+      who.appendChild(el('small', '', bits.join(', ')));
+      row.appendChild(who);
+      const seen = p.lastClass ? `${p.last30} in 30 days, last ${fmtDate(p.lastClass)}` : 'No classes yet';
+      row.appendChild(el('span', 'status', seen));
+      if (p.waiver === false) row.appendChild(el('span', 'tag warn', 'no waiver'));
+      if (!p.active) row.appendChild(el('span', 'tag', 'inactive'));
+      if (p.parent) row.appendChild(el('span', 'tag', 'parent'));
+      if (p.self) row.appendChild(el('span', 'tag', 'this member'));
+      else row.addEventListener('click', () => openMember({ id: p.id, first: p.first, last: p.last }).catch((e) => toast(e.message)));
+      list.appendChild(row);
+    }
+  }
   function renderProgressRow(d) {
     const p = d.progress && d.progress.enabled ? d.progress : null;
     $('member-progress').style.display = p ? '' : 'none';
