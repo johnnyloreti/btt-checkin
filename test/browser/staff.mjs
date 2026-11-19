@@ -497,6 +497,38 @@ await step('family: siblings listed on the member screen, a tap moves between th
   assert.equal(await page.locator('#member-family').isVisible(), false, 'on his own again: no box');
 });
 
+await step('staff note: hidden until switched on, then add, save and see it on the member screen', async () => {
+  // Still on Jack's screen, and notes are off: no box.
+  assert.equal(await page.locator('#member-note .lessonbox').count(), 0);
+  env.MEMBER_NOTES = 'on';
+  await page.click('#member-back');
+  await page.waitForSelector('#member-tiles .tile');
+  await page.click('#member-tiles .tile:has-text("Jack Silva")');
+  await page.waitForSelector('#member-note .lessonbox');
+  assert.match(await page.locator('#member-note').textContent(), /Staff note.*No note\. Staff see this, members never do\./s);
+  await page.click('#member-note .edit');
+  await page.fill('#member-note textarea', 'Left knee, no takedowns.\nPicked up by grandma on Thursdays.');
+  assert.match(await page.locator('#member-note .left').textContent(), /^9\d\d left$/, 'counts down from 1,000');
+  await page.click('#member-note .save');
+  await page.waitForFunction(() => /Left knee, no takedowns/.test(document.querySelector('#member-note .body')?.textContent || ''));
+  assert.equal(env.DB.raw.prepare("SELECT body FROM member_notes WHERE ghl_contact_id = 'c_jack'").get().body, 'Left knee, no takedowns.\nPicked up by grandma on Thursdays.');
+  await page.screenshot({ path: join(OUT, 'staff-member-note.png') });
+
+  // A note half typed survives the screen redrawing for the same member.
+  await page.click('#member-note .edit');
+  await page.fill('#member-note textarea', 'Half typed');
+  await page.click('#stripe-add');
+  await page.click('#stripe-add');
+  await page.waitForFunction(() => /Stripe recorded/.test(document.getElementById('toast').textContent));
+  await page.waitForFunction(() => /4 stripes/.test(document.getElementById('member-facts').textContent));
+  assert.equal(await page.locator('#member-note textarea').inputValue(), 'Half typed');
+  // Put the stripe back so the steps that follow see what they expect.
+  await page.click('#member-note button:has-text("Cancel")');
+  await page.click('#member-promotions .undo');
+  await page.click('#member-promotions .undo');
+  await page.waitForFunction(() => /Grey belt, 3 stripes/.test(document.getElementById('member-facts').textContent));
+});
+
 await step('add a class from the member screen: pick a day, see only their classes', async () => {
   await page.click('.tab[data-tab="members"]');
   await page.fill('#member-search', 'emma');

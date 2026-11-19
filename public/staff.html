@@ -219,6 +219,7 @@
         <button class="award" id="progress-text" type="button">Text it</button>
       </div>
     </div>
+    <div id="member-note" style="margin-bottom:14px"></div>
     <div id="member-family" style="display:none">
       <h2 style="font-size:22px">Family <span class="sub" id="family-sub"></span></h2>
       <div id="family-list" class="list" style="margin-bottom:14px"></div>
@@ -618,7 +619,7 @@
   const LESSON_MAX = 2000;
   // One box: the text and an Edit button, or a textarea with Save and Cancel.
   // onSave gets the new text and returns what was stored.
-  function lessonBox({ label, text, blank, small, onSave }) {
+  function lessonBox({ label, text, blank, small, onSave, max = LESSON_MAX }) {
     const box = el('div', `lessonbox${small ? ' small' : ''}`);
     let value = text || '';
     const view = () => {
@@ -634,13 +635,13 @@
     const editMode = () => {
       box.innerHTML = '';
       const area = el('textarea');
-      area.maxLength = LESSON_MAX;
+      area.maxLength = max;
       area.value = value;
       const acts = el('div', 'acts');
       const save = el('button', 'save', 'Save');
       const cancel = el('button', '', 'Cancel');
       const left = el('span', 'left');
-      const count = () => { left.textContent = `${LESSON_MAX - area.value.length} left`; };
+      const count = () => { left.textContent = `${max - area.value.length} left`; };
       save.type = 'button';
       cancel.type = 'button';
       area.addEventListener('input', count);
@@ -781,6 +782,7 @@
     fact('GHL rollup', d.rollupPending ? 'Pending tonight' : 'Up to date');
     renderProgressRow(d);
     renderFamily(d);
+    renderMemberNote(d, m);
     renderRankForm(d);
     renderPromotions(d, m);
     renderMemberTab(d, m);
@@ -810,6 +812,24 @@
   // The member's progress page (§15.7): copy the link, or have GHL text it
   // to the member, or to the parent when one is linked.
   let progressUrl = '';
+  // A staff note on this member (§15.11). Hidden unless notes are on. Like
+  // the class note, a note being typed is left alone when the screen redraws
+  // for the same member.
+  function renderMemberNote(d, m) {
+    const box = $('member-note');
+    const n = d.note && d.note.enabled ? d.note : null;
+    if (n && box.dataset.key === m.id && box.querySelector('textarea')) return;
+    box.dataset.key = n ? m.id : '';
+    box.innerHTML = '';
+    if (!n) return;
+    box.appendChild(lessonBox({
+      label: 'Staff note',
+      text: n.body,
+      blank: 'No note. Staff see this, members never do.',
+      max: n.max,
+      onSave: async (body) => (await post('/api/staff/member/note', { contactId: m.id, body })).note,
+    }));
+  }
   // The household (§15.10): a parent and the kids linked to them. A tap on
   // anyone else opens their screen. Hidden for a member on their own.
   function renderFamily(d) {

@@ -56,6 +56,9 @@ export const BELT_COLUMNS = ['belt', 'stripes', 'starting'];
 /** The two tables migration 007 creates (§15.8). All or nothing. */
 export const LESSON_TABLES = ['lesson_plans', 'class_notes'];
 
+/** The table migration 008 creates (§15.11). */
+export const MEMBER_NOTES_TABLES = ['member_notes'];
+
 // Table and column names here are this file's own constants, never request
 // input, so they are written into the SQL as they are.
 async function tablesPresent(env, names) {
@@ -77,6 +80,7 @@ const caps = {
   payer: remembered((env) => columnsPresent(env, 'members', ['payer_contact_id'])),
   belt: remembered((env) => columnsPresent(env, 'promotions', BELT_COLUMNS)),
   lessons: remembered((env) => tablesPresent(env, LESSON_TABLES)),
+  memberNotes: remembered((env) => tablesPresent(env, MEMBER_NOTES_TABLES)),
 };
 
 /** True when members.waiver exists (migration 002). */
@@ -96,6 +100,9 @@ export const hasBeltColumns = (env) => caps.belt.get(env);
 
 /** True when both lesson tables exist (migration 007, §15.8). */
 export const hasLessonTables = (env) => caps.lessons.get(env);
+
+/** True when the member_notes table exists (migration 008, §15.11). */
+export const hasMemberNotesTable = (env) => caps.memberNotes.get(env);
 
 /** Test hook: forget every answer. */
 export function resetSchemaCaps() {

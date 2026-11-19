@@ -290,6 +290,7 @@ Vars in `wrangler.toml`:
 - `TAB_ITEMS`, `TAB_PROGRAMS`, `TAB_MIN_CENTS`, `TAB_MAX_ROLL_DAYS`, `TAB_AUTO_HOUR` (§15.3 drink tab; empty `TAB_ITEMS` turns it off, empty `TAB_AUTO_HOUR` makes charging button-only)
 - `BELTS_KIDS`, `BELTS_ADULT` (§15.4 belt lists; both blank turns belts off) and `AWAY_DAYS` (§15.5; "0" turns the Away tab off)
 - `PROGRESS_PAGE`, `PROGRESS_FIELD` (§15.7; "off" removes the page, a blank field leaves staff with Copy link only) and `LESSON_NOTES` (§15.8; "off" hides lesson notes)
+- `MEMBER_NOTES` (§15.11; "on" shows a staff note on the member screen and needs migration 008; ships "off")
 - `FAMILY_VIEW` (§15.10; "on" shows the Family box on the staff member screen, anything else hides it; ships "off")
 - `WAIVER_TAG`, `WAIVER_FIELD` (§15.1), and `PAYER_FIELD`, `WAIVER_PAYER_FIELD` (§15.1 kids, Phase 1b; either blank sends every reminder to the member's own contact)
 
@@ -796,3 +797,17 @@ Johnny, going to bed on 2026-11-19: "Propose a plan to continue the build and ke
 **What it cannot show.** A parent who does not train is not in `members` (§6, `program:none`), so D1 has no name for them. The list says "a parent is on file and does not train here" and stops there. Looking the name up would be a GHL call on every member screen; not built.
 
 **Rules it keeps.** Staff-only, read-only, no GHL call, no migration, nothing on the kiosk. Ids in the response are the kiosk's opaque ones; a contact id never leaves the Worker. Removed check-ins are not classes. Before migration 005 there are no links to read and the box is off; before 006 it lists without ranks. `src/family.js`, `test/family.test.js`.
+
+### 15.11 A staff note on a member (built 2026-11-19, **not yet approved, ships off**)
+
+Same footing as §15.10: on the plan Claude posted when Johnny said to continue the build overnight, not something he has said yes to. §3 says no notes in V1. So it is built and tested and **switched off**: `MEMBER_NOTES = "off"`. While it is off nothing reads the table, the member screen is unchanged, and `/health` does not ask for the migration.
+
+**Why this one in particular is Johnny's call.** It is free text about people, some of them children ("left knee, no takedowns", who collects a kid), kept in D1 behind the one shared four-digit staff PIN. That may be exactly what the front desk needs, or it may be something he would rather keep in GHL or not write down at all.
+
+**What it is.** One note per member on the staff member screen, under the progress row: Add or Edit, a text box, Save and Cancel, the same box lesson notes use. Plain text, up to 1,000 characters, shown with line breaks and never as markup. Saving blank removes it. A note being typed survives the screen redrawing.
+
+**Where it never goes.** The kiosk, the progress page, the member login page, GHL. Nothing on the check-in path reads it. `test/notes.test.js` checks the roster, a check-in and the progress page for the note's text.
+
+**To turn it on:** run `src/db/migrations/008_member_notes.sql`, set `MEMBER_NOTES = "on"`, deploy, and change this heading to say approved. Switched on before the migration, the box stays hidden, a save is refused naming the file, and `/health` goes `ok: false` naming it (`hasMemberNotesTable` in `src/schema-caps.js`).
+
+**Route (PIN):** `POST /api/staff/member/note { contactId, body }`. `GET /api/staff/member` carries `note`. `src/notes.js`.

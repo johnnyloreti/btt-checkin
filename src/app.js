@@ -9,7 +9,7 @@ import {
 import { reviewPayers, payerCardStatus, startCloseout, runPayer, refreshPayer, markPaidAtPos, latestCloseout, closeoutPayers, tabTick } from './closeout.js';
 import { runRollup } from './rollup.js';
 import { notifyWaiverCheckin, waiverEnabled, logWaiverFailure, payerFieldKey } from './waiver.js';
-import { hasWaiverColumn, hasPromotionsTable, hasTabTables, hasPayerColumn, hasBeltColumns, hasLessonTables } from './schema-caps.js';
+import { hasWaiverColumn, hasPromotionsTable, hasTabTables, hasPayerColumn, hasBeltColumns, hasLessonTables, hasMemberNotesTable } from './schema-caps.js';
 import { tabConfig, canBuy } from './tab.js';
 import { createSetupToken, readSetupToken, completeSetup, clearLockout, pinActivity, writePinLink, requirePepper } from './pin.js';
 import { hasNoCardFlag, recordPurchase, purchasesBetween, voidPurchase, memberTab, clearNoCardFlag } from './purchases.js';
@@ -27,6 +27,7 @@ import { today, classRoster, voidAttendance, memberHistory, awayList, trends } f
 import { lessonsEnabled, lessonFor, lessonsOn, weekPlan, savePlan, saveNote } from './lessons.js';
 import { progressEnabled, progressFieldKey, progressPage, progressLinkFor, writeProgressLink, linkContactFor } from './progress.js';
 import { household } from './family.js';
+import { memberNote, saveMemberNote, memberNotesEnabled, NOTES_MIGRATION } from './notes.js';
 import { memberLogin, linkAllowance, recordLinkSend, pinLinksToday, WEB_PIN_LINKS_PER_DAY } from './member.js';
 import { localParts, localDayBounds } from './time.js';
 
@@ -124,6 +125,7 @@ export async function health(env, schedule, now = new Date(), opts = {}) {
     if (payerFieldKey(env) && !(await hasPayerColumn(env))) problems.push('members.payer_contact_id missing: run src/db/migrations/005_payer.sql');
     if (beltsEnabled(env) && (await hasPromotionsTable(env)) && !(await hasBeltColumns(env))) problems.push('promotions belt columns missing: run src/db/migrations/006_belts.sql');
     if (lessonsEnabled(env) && !(await hasLessonTables(env))) problems.push('lesson tables missing: run src/db/migrations/007_lessons.sql');
+    if (memberNotesEnabled(env) && !(await hasMemberNotesTable(env))) problems.push(`member_notes table missing: run ${NOTES_MIGRATION}`);
     // The tab (§15.3): off, on, or misconfigured, and whether its tables exist.
     const tab = tabConfig(env, opts.tabItems || {});
     const tabSchema = await hasTabTables(env);
@@ -620,6 +622,16 @@ export function createApp(schedule, deps = defaultDeps(), opts = {}) {
             return json(await saveNote(env, schedule, { classStartLocal: body.classStartLocal, className: body.className, body: body.body, now: now() }));
           }
 
+          // ---- a staff note on a member (§15.11) ----
+          if (method === 'POST' && path === '/api/staff/member/note') {
+            const body = await readJson(request);
+            if (!body) return json({ error: 'expected JSON body' }, 400);
+            if (!memberNotesEnabled(env)) return json({ error: 'member notes are off' }, 404);
+            const member = await resolveMember(env, body.contactId);
+            if (!member) return json({ error: 'unknown member' }, 404);
+            return json(await saveMemberNote(env, member.ghl_contact_id, body.body, now()));
+          }
+
           // ---- progress page link (§15.7) ----
           if (method === 'POST' && path === '/api/staff/progress-link') {
             if (!progressEnabled(env)) return json({ error: 'the progress page is off' }, 404);
@@ -659,6 +671,7 @@ export function createApp(schedule, deps = defaultDeps(), opts = {}) {
               rank: await memberRank(env, member),
               progress: await memberProgressLink(env, member, url),
               family: await household(env, schedule, member, now()),
+              note: await memberNote(env, member.ghl_contact_id),
               canRecordStripe: stripesEnabled(env) && (await hasPromotionsTable(env)),
               tab,
             });

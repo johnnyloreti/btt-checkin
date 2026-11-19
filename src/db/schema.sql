@@ -165,3 +165,10 @@ CREATE TABLE IF NOT EXISTS class_notes (
   updated_at        TEXT NOT NULL,   -- ISO UTC
   PRIMARY KEY (class_start_local, class_name)
 );
+
+-- A staff note on a member (§15.11). Same statement as src/db/migrations/008_member_notes.sql.
+CREATE TABLE IF NOT EXISTS member_notes (
+  ghl_contact_id TEXT PRIMARY KEY,
+  body           TEXT NOT NULL,
+  updated_at     TEXT NOT NULL       -- ISO UTC
+);
