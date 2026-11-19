@@ -1,6 +1,6 @@
 # btt-checkin STATUS
 
-**Last updated:** 2026-09-07
+**Last updated:** 2026-11-19
 **Build order (§10):** steps 1 through 7 complete. Deployed 2026-09-07 at `https://btt-checkin.black-term-300b.workers.dev` with the cron trigger active. Acceptance test passed the same day: kiosk check-in, staff roster, and a rollup that filled all five GHL fields. Logo in place. Live at `https://checkin.bttbridgewater.com` via the Netlify proxy since 2026-09-07; both cron jobs confirmed running on their own.
 
 ## What is built
@@ -180,6 +180,8 @@ The drink-tab half of Phase 1b (kids buying on a parent's tab with the parent's 
 
 ## After every deploy: reload the iPad
 
+**From the 2026-11-19 build on, the kiosk does this itself** (§2). Reload it by hand once more, for the deploy that first carries that change. The staff page still needs a reload.
+
 Learned 2026-09-29. The kiosk page never reloads its own code; it only re-fetches the roster every 10 minutes. An iPad left in Guided Access kept a copy from before the drink tab shipped, so check-ins worked but no drinks ever showed. After any deploy that changes the kiosk: leave Guided Access, close the app (or pull down to reload in Safari), reopen, and check yourself in. A self-updating kiosk is offered, not built.
 
 ## Drinks, 2026-09-29
@@ -221,6 +223,33 @@ Three things from the BJJLink review, all staff page only.
 - **Member login (§15.9).** `checkin.bttbridgewater.com/member`: a member picks their name, then types their purchase PIN or taps "Text me my link". For a kid it is the parent's PIN and the parent's phone. The phone remembers the page afterwards. Five wrong PINs on one account pause PIN login for that account for a day; this never locks the kiosk. This is the address for a poster or QR code.
 - **Lesson notes and the Plan tab (§15.8).** A plan per program per week and a note per class. Tonight shows the first line; the class roster has both boxes; the Plan tab lays out a week.
 - **Migration:** `src/db/migrations/007_lessons.sql`, once. The deploy survives either order; until it runs the lesson boxes are hidden and `/health` says so.
+
+## Review and overnight build, 2026-11-19
+
+Johnny: "Propose a plan to continue the build and keep yourself busy." Six items, each its own commit on the session branch. Nothing is deployed.
+
+**1. A second read of everything built that day.** Fixed:
+- *Member page, PIN guesses.* The five-a-day limit counted wrong tries before checking a PIN and wrote them after, so a burst of requests sent together could each get a guess. A try is now claimed first (§15.9).
+- *Member page, texts.* "Text me my link" leaned on GHL not re-sending an unchanged field. The Worker now enforces one a day per account itself, with a ceiling of 40 across everyone, and "Set up or reset my PIN" is three a day per account. Otherwise anyone could tap every name and text the whole gym.
+- *Weak PINs.* 0000, 1234, 9876 and the like (24 of 10,000) are refused when a PIN is set. PINs people already have are untouched. **This changes what a member sees at setup; say so if you would rather not have it.**
+- *Progress page.* A rate limit or a server hiccup made the phone forget its saved page. Only a dead link does that now.
+- *Belts.* Recording a new belt carried the old belt's stripes across. A different belt now starts at zero.
+- *Stripe, belt and undo buttons.* A write that worked but whose screen refresh failed was reported as failed, button still armed; one more tap wrote a second row or undid a second promotion.
+- *Double taps* on Away, Trends, Stripes or a Plan arrow drew the view twice; on Plan a save could land in the wrong week.
+- *Lesson notes.* A half-typed class note was thrown away when the roster reloaded.
+- *Migrations.* A migration run after its deploy stayed unseen until Cloudflare recycled the isolate. It is now noticed within a minute.
+- Server-side code for belts, Away, Trends and lessons came out clean: no unguarded migration column, no contact id reaching the browser, no markup injection.
+
+**2. Rollup in batches (§6).** 20 contacts a tick, carried on over the following ticks. See the limits note under the drink tab.
+
+**3. The kiosk updates itself (§2).** No more reloading the iPad after a deploy. It reloads only when nobody is at the screen, never on a wifi sign-in page, never offline. **The deploy that carries this still needs one last manual reload**, because the page on the iPad today does not have it yet.
+
+**4 and 5. Built, and switched off.** The Family box (§15.10) and a staff note on a member (§15.11). Both are V2 items you have not said yes to, so `FAMILY_VIEW` and `MEMBER_NOTES` ship `"off"` and a deploy changes nothing anyone sees. Say the word and each is a one-line change; the note also needs `src/db/migrations/008_member_notes.sql`.
+
+**6. Handover, in `docs/handover/`.**
+- `progress-link-workflow-prompt.md`: paste into Claude in Chrome to build the "Check-In: Progress link" workflow.
+- `member-page-poster.pdf`: a Letter-size poster with a QR code for `checkin.bttbridgewater.com/member`. Put it up after the deploy and after that workflow is published, or "Text me my link" will promise a text that does not come.
+- `whats-new-for-staff.pdf`: one page for the desk and the coaches.
 
 ## Still open after go-live
 

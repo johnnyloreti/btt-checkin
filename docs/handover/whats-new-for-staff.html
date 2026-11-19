@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>What is new on the staff page</title>
+<!--
+  One page for the front desk and coaches. Letter size, portrait.
+  To print: open whats-new-for-staff.pdf in this folder.
+  It describes the staff page after the deploy that carries CLAUDE.md §15.4 to
+  §15.9. It leaves out the two features that ship switched off (§15.10, §15.11).
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  @page { size: Letter portrait; margin: 0; }
+  :root { --ink: #09090a; --gold: #a8860f; --muted: #55524b; --line: #d8d4c8; --display: 'Oswald', 'Arial Narrow', sans-serif; --body: 'Inter', 'Helvetica Neue', Arial, sans-serif; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: #d9d6ce; }
+  .sheet { width: 8.5in; height: 11in; margin: 0 auto; background: #fff; color: var(--ink); font-family: var(--body); padding: .42in .6in .38in; overflow: hidden; font-size: 9.7pt; line-height: 1.4; }
+  .brand { font-family: var(--display); font-weight: 600; letter-spacing: .16em; text-transform: uppercase; font-size: 9pt; color: var(--muted); margin: 0; }
+  h1 { font-family: var(--display); font-weight: 600; text-transform: uppercase; font-size: 23pt; line-height: 1.05; margin: .03in 0 .03in; }
+  .lead { color: var(--muted); margin: 0 0 .1in; font-size: 9.4pt; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: .09in .3in; }
+  .card { border-top: 2px solid var(--ink); padding-top: .05in; }
+  h2 { font-family: var(--display); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; font-size: 11pt; margin: 0 0 .02in; }
+  h2 span { font-family: var(--body); font-weight: 600; font-size: 8pt; letter-spacing: .06em; color: var(--gold); margin-left: .06in; vertical-align: middle; }
+  p { margin: 0 0 .03in; }
+  ul { margin: 0; padding-left: .17in; }
+  li { margin-bottom: .012in; }
+  b { font-weight: 600; }
+  .wide { grid-column: 1 / -1; }
+  .ask { background: #f4f1e9; border: 1px solid var(--line); border-radius: .08in; padding: .08in .14in; margin-top: .1in; }
+  .ask h2 { margin-bottom: .05in; }
+  .qa { display: grid; grid-template-columns: 1fr 1fr; gap: .045in .3in; }
+  .qa p { margin: 0; }
+  .qa b { display: block; }
+  .foot { margin-top: .07in; color: var(--muted); font-size: 8.4pt; }
+  @media print { html, body { background: none; } }
+</style>
+</head>
+<body>
+<div class="sheet">
+  <p class="brand">Brazilian Top Team Bridgewater &middot; Staff page</p>
+  <h1>What is new</h1>
+  <p class="lead">Same page, same PIN. There are four new tabs along the top and more on each member's screen. Nothing about checking in has changed.</p>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Stripes <span>CHANGED</span></h2>
+      <p>Under the kids who are ready to be looked at, a second list: <b>One class away</b>. Check it in the morning and you know who would cross the line at tonight's class.</p>
+      <ul><li>No button on those rows. Their next check-in moves them up.</li><li>The count is a prompt, not a promise. The coach decides.</li></ul>
+    </div>
+    <div class="card">
+      <h2>Belts <span>NEW</span></h2>
+      <p>Rank shows beside every name on a class roster and on the member's screen. Everyone starts as a white belt until you say otherwise.</p>
+      <ul><li><b>Record a belt:</b> open the member, pick the belt and the stripes on it, tap twice.</li><li>Tick <b>They already hold this rank</b> for someone who walked in with it. That keeps their class count.</li><li><b>Give a stripe now</b> works for anyone, any time.</li><li>Wrong tap? <b>Undo</b> removes the last one.</li></ul>
+    </div>
+    <div class="card">
+      <h2>Away <span>NEW TAB</span></h2>
+      <p>Who has gone quiet. Active members whose last class was 14 or more days ago, longest first, with the date. Tap a name to open them.</p>
+      <ul><li>Below it: members on the roster who have never checked in.</li></ul>
+    </div>
+    <div class="card">
+      <h2>Trends <span>NEW TAB</span></h2>
+      <p>Check-ins for every class on the schedule, week by week, for the last four weeks. This week is on the right.</p>
+      <ul><li>A dot means the class has not happened yet this week. A zero means nobody came.</li><li>The bottom rows count all check-ins and how many different people trained.</li></ul>
+    </div>
+    <div class="card">
+      <h2>Plan and lesson notes <span>NEW TAB</span></h2>
+      <p>Write what a class will cover. Two levels: a <b>plan for the week</b> for each program, and a <b>note for one class</b>.</p>
+      <ul><li>On <b>Tonight</b>, each class shows the first line of its lesson.</li><li>Open a class to add or edit either one, above the names.</li><li>The <b>Plan</b> tab lays out a whole week. Use the arrows to plan ahead.</li><li>Save it blank to remove it.</li></ul>
+    </div>
+    <div class="card">
+      <h2>Progress page <span>NEW</span></h2>
+      <p>Every member has a page for their phone: class count, belt and stripes, recent classes. A parent's page shows all of their kids.</p>
+      <ul><li>On the member's screen, <b>Text it</b> sends the link to the phone on file, the parent's for a kid. Tap twice.</li><li><b>Copy link</b> if you would rather send it yourself.</li><li>It shows nothing about money, and no stripe countdown.</li></ul>
+    </div>
+  </div>
+
+  <div class="ask">
+    <h2>What members will ask you</h2>
+    <div class="qa">
+      <p><b>How do I see my progress?</b>Scan the poster, or go to checkin.bttbridgewater.com/member. Type your name, then your kiosk PIN, or tap Text me my link.</p>
+      <p><b>I do not have a PIN, or I forgot it.</b>On that page, tap Set up or reset my PIN. A link comes by text. Or open their member screen here and tap Set up PIN while they are at the desk.</p>
+      <p><b>It says my PIN is easy to guess.</b>New PINs cannot be one digit four times or four in a row, like 1111 or 1234. Any other four digits are fine. PINs people already have still work.</p>
+      <p><b>It says PIN login is paused.</b>Too many wrong tries on that page today. It clears on its own within a day. The text link still works, and so does the kiosk.</p>
+      <p><b>My kid's page is missing.</b>The kid is not linked to that parent yet. Tell Johnny which parent, and he will link them.</p>
+      <p><b>Drinks:</b>the kiosk now offers Water $1, Gatorade $2, Hydrate $3 and Protein $4.</p>
+    </div>
+  </div>
+  <p class="foot">The iPad at the desk now picks up updates on its own when nobody is using it. If something on the staff page looks old, reload the page.</p>
+</div>
+</body>
+</html>
