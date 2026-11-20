@@ -266,6 +266,10 @@ You asked for a leaderboard and said "Do top 3, podium visual." On each member's
 - **To keep someone off it:** tag their GHL contact, or their parent's, `leaderboard-hide`. That name is my suggestion; say if you want another. It takes effect within half an hour.
 - **Migration:** `src/db/migrations/009_leaderboard.sql`, once. Until it runs the podium stays hidden and `/health` says so; everything else works.
 
+## Config slip, 2026-11-20
+
+The deploy that afternoon warned "Unexpected fields found in ratelimits[1] field: FAMILY_VIEW, MEMBER_NOTES". Both had been added at the end of `wrangler.toml`, inside the last rate-limit table instead of `[vars]`, so production ran without them: the Family box stayed off. Moved into `[vars]` the same day; `test/wrangler-config.test.js` now fails the suite if any setting sits outside `[vars]`. **If a deploy ever prints "Unexpected fields", stop and send it to Claude.**
+
 ## Still open after go-live
 
 - Rotate `STAFF_PIN`; the first one was pasted into a chat.
