@@ -81,6 +81,7 @@ const caps = {
   belt: remembered((env) => columnsPresent(env, 'promotions', BELT_COLUMNS)),
   lessons: remembered((env) => tablesPresent(env, LESSON_TABLES)),
   memberNotes: remembered((env) => tablesPresent(env, MEMBER_NOTES_TABLES)),
+  board: remembered((env) => columnsPresent(env, 'members', ['board_hidden'])),
 };
 
 /** True when members.waiver exists (migration 002). */
@@ -103,6 +104,9 @@ export const hasLessonTables = (env) => caps.lessons.get(env);
 
 /** True when the member_notes table exists (migration 008, §15.11). */
 export const hasMemberNotesTable = (env) => caps.memberNotes.get(env);
+
+/** True when members.board_hidden exists (migration 009, §15.13). */
+export const hasBoardColumn = (env) => caps.board.get(env);
 
 /** Test hook: forget every answer. */
 export function resetSchemaCaps() {

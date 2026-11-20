@@ -19,6 +19,7 @@ import { localParts } from './time.js';
 import { shiftDate, UNSCHEDULED_CLASS } from './classes.js';
 import { mondayOf } from './rollup.js';
 import { looksLikeContactId } from './waiver.js';
+import { podiums } from './board.js';
 
 const enc = new TextEncoder();
 const TOKEN_RE = /^[0-9a-f]{32}$/;
@@ -160,7 +161,15 @@ export async function progressPage(env, schedule, token, now) {
   const ranks = await ranksFor(env, found.people);
   const people = [];
   for (const m of found.people) people.push(await personProgress(env, schedule, m, ranks.get(m.ghl_contact_id) || null, now));
-  return { ok: true, today: localParts(now, env.TZ || schedule.timezone).date, people };
+  // The month's podium (§15.13). It is an extra: if it cannot be read, the
+  // member's own page still loads.
+  let boards = [];
+  try {
+    boards = await podiums(env, schedule, found.people, now);
+  } catch (e) {
+    console.warn(`podium unavailable: ${e && e.message ? e.message : e}`);
+  }
+  return { ok: true, today: localParts(now, env.TZ || schedule.timezone).date, people, boards };
 }
 
 /**

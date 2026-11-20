@@ -436,7 +436,7 @@ await step('progress page: staff copy or text the link; the page shows the membe
   await me.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
   await me.goto(`${base}/me?t=${token}`);
   await me.waitForSelector('.card');
-  assert.equal(await me.locator('.card').count(), 1);
+  assert.equal(await me.locator('.card:not(.board)').count(), 1);
   assert.equal(await me.locator('.who h1').textContent(), 'Jack Silva');
   assert.equal(await me.locator('.who .prog').textContent(), 'Kids 6-9');
   assert.match(await me.locator('.count').textContent(), /^Class #7/);
@@ -455,7 +455,7 @@ await step('progress page: staff copy or text the link; the page shows the membe
   // A link that matches nobody says so, and nothing else.
   await me.goto(`${base}/me?t=${'0'.repeat(32)}`);
   await me.waitForFunction(() => /could not find this page/.test(document.getElementById('state').textContent));
-  assert.equal(await me.locator('.card').count(), 0);
+  assert.equal(await me.locator('.card:not(.board)').count(), 0);
   assert.deepEqual(meErrors, []);
   await phoneCtx.close();
 });
@@ -830,6 +830,41 @@ await step('kids stripes: the monthly colours on the member screen and the progr
   await page.waitForFunction(() => /Grey-black belt recorded for Jack/.test(document.getElementById('toast').textContent));
   const last = env.DB.raw.prepare("SELECT kind, belt, stripes, starting FROM promotions WHERE ghl_contact_id = 'c_jack' ORDER BY id DESC LIMIT 1").get();
   assert.deepEqual([last.kind, last.belt, last.stripes, last.starting], ['belt', 'grey-black', 0, 0]);
+});
+
+await step('podium: the month\'s top three on the progress page, second on the left, first in the middle and highest', async () => {
+  // Classes this month (the test's "now" is in September 2026) for three kids.
+  const ins = env.DB.raw.prepare("INSERT OR IGNORE INTO attendance (ghl_contact_id, class_name, class_start_local, checked_in_at, method) VALUES (?, 'Kids 6-9', ?, ?, 'staff')");
+  const give = (id, days) => { for (const d of days) ins.run(id, `2026-09-${d}T07:07`, `2026-09-${d}T11:07:00Z`); };
+  give('c_emma', ['01', '02', '03', '04']);
+  give('c_jack', ['01', '02']);
+  give('c_newkid', ['01']);
+  const phoneCtx = await browser.newContext({ ...devices['iPhone 13'], deviceScaleFactor: 2 });
+  const me = await phoneCtx.newPage();
+  const meErrors = [];
+  me.on('pageerror', (e) => meErrors.push(String(e)));
+  await me.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
+  await me.goto(`${base}/me?t=${await progressToken('c_jack', env.ID_SALT)}`);
+  await me.waitForSelector('.board .podium .spot');
+  assert.equal(await me.locator('.board').count(), 1, 'a kid sees the kids board only');
+  assert.match(await me.locator('.board .head').textContent(), /Most classes in September\s*Kids/);
+  assert.equal(await me.locator('.podium .spot').count(), 3);
+  const box = async (place) => me.locator(`.podium .p${place} .step`).boundingBox();
+  const [first, second, third] = [await box(1), await box(2), await box(3)];
+  assert.ok(second.x < first.x && first.x < third.x, 'second, first, third from left to right');
+  assert.ok(first.height > second.height && second.height > third.height, 'first stands highest');
+  assert.ok(Math.abs((first.y + first.height) - (third.y + third.height)) < 1, 'all three stand on the same floor');
+  const names = await me.locator('.podium .name').allTextContents();
+  for (const n of names) assert.match(n, /^\S+ [A-Z]\.$/, `first name and last initial only: ${n}`);
+  assert.equal(await me.locator('.podium .spot.you .name').textContent(), 'Jack S.', 'the member on the page is picked out');
+  const text = await me.locator('.board').textContent();
+  assert.doesNotMatch(text, /Silva|Jones|Newkid/);
+  assert.doesNotMatch(text, /!|—/);
+  assert.match(text, /The top three so far\. It starts again on the 1st\./);
+  assert.deepEqual(meErrors, []);
+  await me.locator('.board').scrollIntoViewIfNeeded();
+  await me.locator('.board').screenshot({ path: join(OUT, 'me-podium.png') });
+  await phoneCtx.close();
 });
 
 await step('sign out returns to the login page', async () => {

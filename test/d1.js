@@ -18,16 +18,18 @@ const SCHEMA = readRepoFile('src/db/schema.sql');
  *   noBelt: true        promotions without the belt columns (006)
  *   noLessons: true     no lesson tables (007)
  *   noMemberNotes: true no member_notes table (008)
+ *   noBoard: true       members without board_hidden (009)
  *
  * Used to prove that a deploy running ahead of its migration degrades
  * instead of breaking.
  */
-export function memoryD1({ legacy = false, noPromotions = false, noTab = false, noPayer = false, noBelt = false, noLessons = false, noMemberNotes = false } = {}) {
+export function memoryD1({ legacy = false, noPromotions = false, noTab = false, noPayer = false, noBelt = false, noLessons = false, noMemberNotes = false, noBoard = false } = {}) {
   resetSchemaCaps();
   const db = new DatabaseSync(':memory:');
   db.exec(SCHEMA);
   if (legacy) db.exec('ALTER TABLE members DROP COLUMN waiver');
   if (legacy || noPayer) db.exec('ALTER TABLE members DROP COLUMN payer_contact_id');
+  if (legacy || noBoard) db.exec('ALTER TABLE members DROP COLUMN board_hidden');
   if (noPromotions) db.exec('DROP TABLE promotions');
   else if (noBelt) for (const c of BELT_COLUMNS) db.exec(`ALTER TABLE promotions DROP COLUMN ${c}`);
   if (noTab) for (const t of TAB_TABLES) db.exec(`DROP TABLE ${t}`);

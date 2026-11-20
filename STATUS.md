@@ -259,6 +259,13 @@ You said the gym follows the IBJJF monthly system for kids. Built: eleven degree
 
 You confirmed it the same day: "Yes we follow this system, but it's every 7 classes not by calendar." That is how it is built: the colours follow the table, and a stripe comes up for review every 7 classes. No migration.
 
+## Monthly podium, 2026-11-20 (§15.13)
+
+You asked for a leaderboard and said "Do top 3, podium visual." On each member's progress page, under their own numbers: the month's top three for classes, drawn as a podium. Kids and adults are ranked apart. Names are a first name and a last initial.
+
+- **To keep someone off it:** tag their GHL contact, or their parent's, `leaderboard-hide`. That name is my suggestion; say if you want another. It takes effect within half an hour.
+- **Migration:** `src/db/migrations/009_leaderboard.sql`, once. Until it runs the podium stays hidden and `/health` says so; everything else works.
+
 ## Still open after go-live
 
 - Rotate `STAFF_PIN`; the first one was pasted into a chat.

@@ -1,7 +1,8 @@
 // roster.js — turn GHL contacts into the members table.
 // Rules from §6. Pure functions first, then the sync that touches D1.
 
-import { hasWaiverColumn, hasPayerColumn } from './schema-caps.js';
+import { hasWaiverColumn, hasPayerColumn, hasBoardColumn } from './schema-caps.js';
+import { boardHideTag } from './board.js';
 import { checkRequiredFields } from './fields.js';
 import { getFieldIds } from './rollup.js';
 import { payerFieldKey, looksLikeContactId } from './waiver.js';
@@ -38,6 +39,8 @@ export function rosterConfig(env, schedule) {
     programTagMap,
     // §15.1: empty means the waiver feature is off and everyone counts as signed.
     waiverTag: String(env.WAIVER_TAG || '').trim().toLowerCase(),
+    // §15.13: the tag that keeps a member off the monthly podium.
+    boardHideTag: boardHideTag(env),
   };
 }
 
@@ -177,7 +180,12 @@ export function buildRoster(contacts, cfg) {
         viaPayer = true;
       }
     }
-    members.push({ ghl_contact_id: c.id, first_name: first, last_name: last, programs, waiver: signed ? 1 : 0, waiverViaPayer: viaPayer, payer_contact_id: payer });
+    // §15.13: off the podium when this contact carries the tag, or the
+    // parent linked to them does. Staff are as likely to tag the parent,
+    // whose contact is the one they talk to, as the kid.
+    const tagged = (contact) => Boolean(cfg.boardHideTag && contact && normTags(contact).includes(cfg.boardHideTag));
+    const hidden = tagged(c) || (linked ? tagged(byId.get(linked)) : false);
+    members.push({ ghl_contact_id: c.id, first_name: first, last_name: last, programs, waiver: signed ? 1 : 0, waiverViaPayer: viaPayer, payer_contact_id: payer, board_hidden: hidden ? 1 : 0 });
   }
   return { members, flagged, notStudents };
 }
@@ -296,6 +304,8 @@ export async function syncRoster(env, schedule, deps) {
     const cols = ['ghl_contact_id', 'first_name', 'last_name', 'programs', 'synced_at'];
     if (withWaiver) cols.push('waiver');
     if (withPayer) cols.push('payer_contact_id');
+    const withBoard = await hasBoardColumn(env);
+    if (withBoard) cols.push('board_hidden');
     const updates = cols.filter((c) => c !== 'ghl_contact_id').map((c) => `${c} = excluded.${c}`);
     const upsert = db.prepare(
       `INSERT INTO members (${cols.join(', ')}, active)
@@ -306,6 +316,7 @@ export async function syncRoster(env, schedule, deps) {
       const vals = [m.ghl_contact_id, m.first_name, m.last_name, JSON.stringify(m.programs), ranAt];
       if (withWaiver) vals.push(m.waiver);
       if (withPayer) vals.push(m.payer_contact_id);
+      if (withBoard) vals.push(m.board_hidden);
       return upsert.bind(...vals);
     });
     // Anyone not touched this run has lost their member tags.
@@ -328,6 +339,7 @@ export async function syncRoster(env, schedule, deps) {
       waiverMissing: cfg.waiverTag ? members.filter((m) => !m.waiver).length : null,
       waiverViaPayer: cfg.waiverTag ? members.filter((m) => m.waiverViaPayer).length : null,
       payerLinks: payerLinksDetail(payerState, members, withPayer),
+      offPodium: withBoard ? members.filter((m) => m.board_hidden).length : null,
       flagged: flagged.map((f) => `${f.name}: ${f.reason}`),
     };
 

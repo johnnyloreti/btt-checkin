@@ -50,6 +50,25 @@
   .recent .c { flex: 1; }
   .recent .t { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
   .none { color: var(--muted); font-size: 16px; padding: 6px 0; }
+  /* The month's podium (§15.13): second, first, third, like a real one. */
+  .board .head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .board .head h1 { font-family: var(--display); font-weight: 500; font-size: 24px; margin: 0; }
+  .board .head .prog { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--gold); white-space: nowrap; }
+  .podium { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; align-items: end; margin-top: 20px; }
+  .podium .spot { text-align: center; min-width: 0; }
+  .podium .name { font-size: 15px; font-weight: 600; overflow-wrap: anywhere; margin-bottom: 8px; }
+  .podium .spot.you .name { color: var(--gold); }
+  .podium .step { border-radius: 10px 10px 0 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding-top: 10px; color: #14110a; }
+  .podium .step b { font-family: var(--display); font-weight: 600; font-size: 34px; line-height: 1; }
+  .podium .step span { font-size: 12px; font-weight: 600; margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .podium .p1 .step { height: 132px; background: var(--gold); }
+  .podium .p2 .step { height: 100px; background: #c9ccd1; }
+  .podium .p3 .step { height: 78px; background: #c08a5a; }
+  .podium .p2 { grid-column: 1; grid-row: 1; }
+  .podium .p1 { grid-column: 2; grid-row: 1; }
+  .podium .p3 { grid-column: 3; grid-row: 1; }
+  .board .floor { height: 4px; background: var(--line); border-radius: 2px; }
+  .board .note { color: var(--muted); font-size: 14px; margin: 12px 0 0; text-align: center; }
   .foot { text-align: center; color: var(--muted); font-size: 14px; line-height: 1.5; margin-top: 24px; }
   .foot a { color: var(--muted); text-underline-offset: 3px; display: inline-block; padding: 10px; }
 </style>
@@ -159,6 +178,27 @@
     return c;
   }
 
+  // The month's podium (§15.13): the top three for classes, by first name
+  // and last initial. Second stands on the left and third on the right, with
+  // first in the middle and highest.
+  function board(b) {
+    const c = el('section', 'card board');
+    const head = el('div', 'head');
+    head.append(el('h1', '', `Most classes in ${b.monthName}`), el('span', 'prog', b.title));
+    c.appendChild(head);
+    const podium = el('div', 'podium');
+    for (const p of b.podium.slice(0, 3)) {
+      const spot = el('div', `spot p${p.place}${p.you ? ' you' : ''}`);
+      const step = el('div', 'step');
+      step.append(el('b', '', String(p.place)), el('span', '', plural(p.classes, 'class')));
+      spot.append(el('div', 'name', p.name), step);
+      podium.appendChild(spot);
+    }
+    c.append(podium, el('div', 'floor'));
+    c.appendChild(el('p', 'note', b.final ? 'Last month\'s top three. The new month starts with the next class.' : 'The top three so far. It starts again on the 1st.'));
+    return c;
+  }
+
   const KEY = 'btt.member.link';
   function remember(v) { try { localStorage.setItem(KEY, v); } catch { /* private mode; carry on */ } }
   function forget() { try { localStorage.removeItem(KEY); } catch { /* nothing to forget */ } }
@@ -188,6 +228,7 @@
     remember(`/me?t=${token}`);
     $('state').hidden = true;
     for (const p of data.people) $('cards').appendChild(card(p));
+    for (const b of Array.isArray(data.boards) ? data.boards : []) if (b.podium && b.podium.length) $('cards').appendChild(board(b));
     document.title = data.people.length === 1 ? `${data.people[0].first} at BTT Bridgewater` : 'BTT Bridgewater progress';
     $('foot').hidden = false;
   }

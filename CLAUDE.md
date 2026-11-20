@@ -291,6 +291,7 @@ Vars in `wrangler.toml`:
 - `BELTS_KIDS`, `BELTS_ADULT` (§15.4 belt lists; both blank turns belts off) and `AWAY_DAYS` (§15.5; "0" turns the Away tab off)
 - `KIDS_STRIPES = "ibjjf-monthly"` (§15.12: kids' stripes are the eleven coloured monthly degrees; "plain" turns that off)
 - `PROGRESS_PAGE`, `PROGRESS_FIELD` (§15.7; "off" removes the page, a blank field leaves staff with Copy link only) and `LESSON_NOTES` (§15.8; "off" hides lesson notes)
+- `LEADERBOARD = "on"`, `LEADERBOARD_SIZE = "3"`, `LEADERBOARD_HIDE_TAG = "leaderboard-hide"` (§15.13: the monthly podium on the progress page; needs migration 009)
 - `MEMBER_NOTES` (§15.11; "on" shows a staff note on the member screen and needs migration 008; ships "off")
 - `FAMILY_VIEW = "on"` (§15.10; shows the Family box on the staff member screen, anything else hides it)
 - `WAIVER_TAG`, `WAIVER_FIELD` (§15.1), and `PAYER_FIELD`, `WAIVER_PAYER_FIELD` (§15.1 kids, Phase 1b; either blank sends every reminder to the member's own contact)
@@ -732,7 +733,7 @@ Rows come from `schedule.json` as it is today, so a class dropped from the sched
 
 Johnny picked this from the BJJLink list as one of the two features worth building next. A page a member, or a kid's parent, opens on their own phone: `/me?t=<token>`.
 
-**What it shows, per person:** name and program, "Class #N", belt and stripes drawn as a belt (when §15.4 is ready), classes this week and in the last 30 days, weeks in a row with a class, the next round-number milestone ("3 classes to Class #10"), and the last ten classes. Removed check-ins are not classes. **Never:** a contact id, an email or phone, the tab, a waiver, anything about money. It also never shows the count toward the next stripe: §15.2 says the class count is one input and the instructor decides, and a number on a parent's phone would read as a promise.
+**What it shows, per person:** name and program, "Class #N", belt and stripes drawn as a belt (when §15.4 is ready), classes this week and in the last 30 days, weeks in a row with a class, the next round-number milestone ("3 classes to Class #10"), and the last ten classes. Removed check-ins are not classes. **Never:** a contact id, an email or phone, the tab, a waiver, anything about money. It also never shows the count toward the next stripe: §15.2 says the class count is one input and the instructor decides, and a number on a parent's phone would read as a promise. The one thing it shows about anyone else is the month's podium (§15.13).
 
 **The token** is `HMAC-SHA256(ID_SALT, "progress:v1:" + contact id)`, 32 hex characters. It is the same every time, so the page can be saved to a home screen, and it needs no table and no migration. It is made for a contact, not a member: a parent's link shows every kid linked to them through `payer_contact_id` (§15.1), and the parent too if they train. A token that matches nobody returns 404 and says nothing. Changing `v1` in `src/progress.js` retires every link at once; there is no per-member revoke.
 
@@ -840,3 +841,27 @@ Johnny: "We also follow the monthly stripe ibjjf system for kids stripes where t
 **The twelfth is the belt.** A kid on eleven stripes cannot be given another: the server refuses with what comes next, "Give a stripe now" is hidden, and the member screen says "Eleven stripes. The next step is the Grey-black belt." On the Stripes tab their row reads "belt next" and the button records that belt, two taps like every other write. On the last kids belt there is nothing to record from there.
 
 **Config:** `KIDS_STRIPES = "ibjjf-monthly"`; `"plain"` puts kids back on plain stripes. No migration: the degree is the stripe count already stored (§15.4). Before migration 006 stripes record as before with no ceiling, because without the belt columns there is no rank to count on. `test/belts.test.js`.
+
+### 15.13 Monthly podium on the progress page (approved 2026-11-20)
+
+Johnny asked whether members can see training history for all members, "for example a class attendance leaderboard". They could not: a member's page showed only their own. Offered a monthly board with an opt-out, he said: "Do top 3, podium visual."
+
+**What it is.** Under a member's own numbers on `/me`: "Most classes in November", the top three drawn as a podium, second on the left, first in the middle and highest, third on the right. Each step carries the place and the class count; the name stands above it. Someone on this page is picked out in gold. It counts attended classes in the ET calendar month and starts again on the 1st, so a newer member is always in the race.
+
+**Two boards.** Kids (anyone in a kids program, a teen in both included) and adults (everyone else) are ranked apart. A page shows the board for whoever is on it: a kid's or a parent's page the kids board, an adult's the adult board, both when both are on it.
+
+**The one place a member sees anything about another member, so it shows as little as it can:** a first name and a last initial ("Jack S."), and a count. Never a full last name, a contact id, or which classes. It sits behind the progress link or PIN like the rest of the page; it is not on the kiosk.
+
+**Rules.**
+- Only active members with at least one class in the month. A removed check-in is not a class.
+- A tie goes to whoever reached that count first, then by name, so the order never shuffles between two looks.
+- Before anyone in a group has trained in a new month, last month's top three stand and the note says so; the first class of the month starts the new board.
+- No classes this month or last: no board.
+
+**Keeping a member off.** The tag `LEADERBOARD_HIDE_TAG` on the member's GHL contact, **or on their linked parent's** (`payer_contact_id`, §15.1), keeps them off: staff are as likely to tag the parent as the kid. The roster sync turns it into `members.board_hidden` every run, so adding or removing the tag takes effect within half an hour, and the sync detail carries `offPodium`. **`leaderboard-hide` is the name Claude proposed, not one Johnny chose; he can rename it in `wrangler.toml`.** GHL makes a tag the first time it is used, so there is nothing to create first. A hidden member still sees the board on their own page; they are just not on it.
+
+**Schema:** migration `src/db/migrations/009_leaderboard.sql` adds `members.board_hidden`. Per the §15.1 rule, `hasBoardColumn` in `src/schema-caps.js` guards it: before the migration the podium is hidden everywhere (without the column nobody could be kept off it), the member's own page loads as before, the roster sync writes every other column, and `/health` goes `ok: false` naming the file. Nothing on the check-in path reads the column.
+
+**Config:** `LEADERBOARD = "on"` (`"off"` removes it and quiets `/health`), `LEADERBOARD_SIZE = "3"` (up to 10; the podium draws the first three), `LEADERBOARD_HIDE_TAG`. `GET /api/progress` carries `boards`; if the board cannot be read the page still loads without it. `src/board.js`, `test/board.test.js`.
+
+**Not built.** No all-time board (it is won by whoever joined first), no board on the kiosk or the staff page, no prize or message when the month ends.

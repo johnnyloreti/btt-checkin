@@ -9,7 +9,8 @@ const schedule = loadSchedule(readRepoFile('schedule.json'));
 
 // The waiver column check is cached per isolate; each fake database re-asks.
 const migrated = {
-  'pragma_table_info': [{ name: 'waiver' }],
+  // Migrations 002 and 009 have run: members has waiver and board_hidden.
+  'pragma_table_info': [{ name: 'waiver' }, { name: 'board_hidden' }],
   // Migration 007 has run: both lesson tables are there (§15.8).
   "IN ('lesson_plans', 'class_notes')": [{ name: 'lesson_plans' }, { name: 'class_notes' }],
 };

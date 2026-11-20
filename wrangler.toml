@@ -44,6 +44,14 @@ BELTS_ADULT = "white,blue,purple,brown,black"
 # belt. "plain" puts kids back on plain stripes with no ceiling.
 KIDS_STRIPES = "ibjjf-monthly"
 
+# Monthly podium on the member progress page (§15.13). "off" removes it.
+# LEADERBOARD_SIZE is how many places. A member whose GHL contact, or whose
+# linked parent's, carries LEADERBOARD_HIDE_TAG is kept off it. Needs
+# migration 009; until that has run the podium stays hidden.
+LEADERBOARD = "on"
+LEADERBOARD_SIZE = "3"
+LEADERBOARD_HIDE_TAG = "leaderboard-hide"
+
 # Away list (§15.5). Days without a class before a member shows on the staff
 # Away tab. "0" turns the list off.
 AWAY_DAYS = "14"

@@ -10,7 +10,12 @@ CREATE TABLE IF NOT EXISTS members (
   active         INTEGER NOT NULL DEFAULT 1,
   synced_at      TEXT NOT NULL,
   waiver         INTEGER NOT NULL DEFAULT 1,  -- 1 = waiver tag present or feature off (§15.1)
-  payer_contact_id TEXT                       -- parent who pays, from PAYER_FIELD (§15.3 Phase 1b); NULL = self
+  payer_contact_id TEXT,                      -- parent who pays (PAYER_FIELD; §15.3 Phase 1b). NULL = self
+  -- 1 = kept off the monthly podium (§15.13; migration 009). No commas in
+  -- these two comments: the test database drops this column to stand in for
+  -- a pending migration and SQLite finds the column's start by scanning back
+  -- for one.
+  board_hidden   INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS attendance (

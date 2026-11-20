@@ -9,7 +9,7 @@ import {
 import { reviewPayers, payerCardStatus, startCloseout, runPayer, refreshPayer, markPaidAtPos, latestCloseout, closeoutPayers, tabTick } from './closeout.js';
 import { runRollup } from './rollup.js';
 import { notifyWaiverCheckin, waiverEnabled, logWaiverFailure, payerFieldKey } from './waiver.js';
-import { hasWaiverColumn, hasPromotionsTable, hasTabTables, hasPayerColumn, hasBeltColumns, hasLessonTables, hasMemberNotesTable } from './schema-caps.js';
+import { hasWaiverColumn, hasPromotionsTable, hasTabTables, hasPayerColumn, hasBeltColumns, hasLessonTables, hasMemberNotesTable, hasBoardColumn } from './schema-caps.js';
 import { tabConfig, canBuy } from './tab.js';
 import { createSetupToken, readSetupToken, completeSetup, clearLockout, pinActivity, writePinLink, requirePepper } from './pin.js';
 import { hasNoCardFlag, recordPurchase, purchasesBetween, voidPurchase, memberTab, clearNoCardFlag } from './purchases.js';
@@ -27,6 +27,7 @@ import { today, classRoster, voidAttendance, memberHistory, awayList, trends } f
 import { lessonsEnabled, lessonFor, lessonsOn, weekPlan, savePlan, saveNote } from './lessons.js';
 import { progressEnabled, progressFieldKey, progressPage, progressLinkFor, writeProgressLink, linkContactFor } from './progress.js';
 import { household } from './family.js';
+import { boardEnabled, BOARD_MIGRATION } from './board.js';
 import { memberNote, saveMemberNote, memberNotesEnabled, NOTES_MIGRATION } from './notes.js';
 import { memberLogin, linkAllowance, recordLinkSend, pinLinksToday, WEB_PIN_LINKS_PER_DAY } from './member.js';
 import { localParts, localDayBounds } from './time.js';
@@ -125,6 +126,7 @@ export async function health(env, schedule, now = new Date(), opts = {}) {
     if (payerFieldKey(env) && !(await hasPayerColumn(env))) problems.push('members.payer_contact_id missing: run src/db/migrations/005_payer.sql');
     if (beltsEnabled(env) && (await hasPromotionsTable(env)) && !(await hasBeltColumns(env))) problems.push('promotions belt columns missing: run src/db/migrations/006_belts.sql');
     if (lessonsEnabled(env) && !(await hasLessonTables(env))) problems.push('lesson tables missing: run src/db/migrations/007_lessons.sql');
+    if (boardEnabled(env) && progressEnabled(env) && !(await hasBoardColumn(env))) problems.push(`members.board_hidden missing: run ${BOARD_MIGRATION}`);
     if (memberNotesEnabled(env) && !(await hasMemberNotesTable(env))) problems.push(`member_notes table missing: run ${NOTES_MIGRATION}`);
     // The tab (§15.3): off, on, or misconfigured, and whether its tables exist.
     const tab = tabConfig(env, opts.tabItems || {});
